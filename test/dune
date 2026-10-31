@@ -1,0 +1,17 @@
+(library
+ (name gen_instr)
+ (modules gen_instr)
+ (libraries riscv qcheck-core))
+
+(test
+ (name test_main)
+ (modules test_main)
+ (libraries riscv gen_instr qcheck-core qcheck-core.runner)
+ (deps
+  (glob_files %{project_root}/examples/*.s)
+  (glob_files %{project_root}/examples/*.expected)))
+
+(test
+ (name xcheck)
+ (modules xcheck)
+ (libraries riscv gen_instr qcheck-core))
