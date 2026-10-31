@@ -159,6 +159,9 @@ configs, and OpenSBI's `generic` platform as they are.
 
 ## Phase 8: Performance (needed to compile OCaml in reasonable time)
 
+The detailed targets, measurement method and step-by-step plan are in
+[docs/perf](docs/perf/README.md).
+
 Booting Debian takes billions of instructions, and compiling OCaml takes
 hundreds of billions. An interpreter that boxes `int64` everywhere runs at
 maybe 5–20 MIPS, and we want hundreds.
