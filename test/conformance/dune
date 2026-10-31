@@ -1,0 +1,15 @@
+; Official conformance suites (not part of `dune test`; they need external
+; checkouts and take a few minutes): run with `dune build @conformance`.
+
+(executable
+ (name conformance)
+ (libraries riscv unix str))
+
+(rule
+ (alias conformance)
+ (deps
+  conformance.exe
+  (source_tree riscv-tests-env)
+  (source_tree arch-test-model))
+ (action
+  (run %{dep:conformance.exe})))

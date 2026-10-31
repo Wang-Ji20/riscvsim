@@ -20,17 +20,21 @@ testable. A step marked ✅ is done in the user-mode simulator.
 0.2 ✅ Assembler, ELF writer/loader, Linux-ABI syscall emulation
 0.3 ✅ Property tests (QCheck2) and a byte-exact differential test of all
     encodings against clang
-0.4 Pass the official **riscv-tests** `rv64u{i,m,a,f,d,c}-p-*` suites. Load
-    their ELFs; they report results through `tohost`, so add an
-    HTIF-style `tohost`/`fromhost` MMIO hook.
-0.5 Run **riscv-arch-test** (the RISC-V International compliance suite) for
-    the same extensions and diff the signatures against Spike's.
-0.6 Get a static `riscv64-linux-musl` "hello world" running in user mode.
-    This needs `brk`, `mmap`, `writev`, `set_tid_address`, `exit_group`, and
-    the initial stack layout (argc, argv, envp, auxv).
-0.7 Run a statically linked OCaml *bytecode* runtime (`ocamlrun`) in user
-    mode. This is the first sign that the OCaml toolchain can run on the
-    simulator.
+0.4 ✅ Pass the official **riscv-tests**: 150/150 (rv64u{i,m,a,f,d,c},
+    rv64uzba/zbb/zbs), using a user-mode environment instead of HTIF.
+0.5 ✅ **riscv-arch-test** 2.7.4: 265/265 signatures match the shipped
+    references (I, M, C, D, Zifencei). Spike, and ACT4's Sail-based
+    self-checking flow, remain to do as an extra oracle (they need
+    permission to build external code).
+0.6 ✅ Static C programs in user mode, with the Linux initial stack
+    (argc, argv, envp, auxv) and about 60 syscalls. Programs are checked
+    on our own freestanding libc (`guest/libc`, the "musl-like" one) and on
+    static glibc 2.44, both against a native host build.
+0.7 ⏳ Run a statically linked OCaml *bytecode* runtime (`ocamlrun`) in
+    user mode. `guest/ocamlrun/build.sh` cross-builds it without OCaml's
+    configure; it's waiting on permission to compile the downloaded OCaml
+    sources. Likely next hurdle: OCaml 5's domain backup thread needs
+    `clone(CLONE_THREAD)`, which means real guest threads.
 
 ## Phase 1: Architecture refactor for system mode
 

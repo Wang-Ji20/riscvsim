@@ -988,4 +988,6 @@ let assemble ?(rvc = false) (source : string) : (Image.t, error list) result =
             | Some e -> e
             | None -> text_base
           in
-          Ok { Image.entry; segments; symbols })
+          (* marks images that use the RARS-style debug syscalls; see Os *)
+          let symbols = ("__riscvsim_debug_calls", 0L) :: symbols in
+          Ok { Image.entry; segments; symbols; phdrs = None })

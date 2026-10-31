@@ -261,6 +261,29 @@ let read (s : string) : (file, string) result =
       (in_bounds phoff (phnum * phentsize) || phnum = 0)
       "truncated program headers"
   in
+  let phdr_at k =
+    let b = phoff + (k * phentsize) in
+    (u32 b, off64 (b + 8), u64 (b + 16))
+  in
+  let phdrs =
+    (* PT_PHDR if present, else the PT_LOAD whose file range covers them *)
+    let all = List.init phnum phdr_at in
+    let addr =
+      match List.find_opt (fun (ty, _, _) -> ty = 6) all with
+      | Some (_, _, vaddr) -> Some vaddr
+      | None ->
+          List.find_map
+            (fun (k, (ty, off, vaddr)) ->
+              let filesz = off64 (phoff + (k * phentsize) + 32) in
+              if ty = 1 && off <= phoff && phoff < off + filesz then
+                Some (Int64.add vaddr (Int64.of_int (phoff - off)))
+              else None)
+            (List.mapi (fun k p -> (k, p)) all)
+    in
+    Option.map
+      (fun addr -> { Image.addr; num = phnum; entsize = phentsize })
+      addr
+  in
   let segments =
     List.init phnum (fun k -> phoff + (k * phentsize))
     |> List.filter_map (fun b ->
@@ -286,6 +309,6 @@ let read (s : string) : (file, string) result =
                   };
               })
   in
-  Ok { etype; image = { entry; segments; symbols }; sections }
+  Ok { etype; image = { entry; segments; symbols; phdrs }; sections }
 
 let is_elf s = String.length s >= 4 && String.sub s 0 4 = "\x7fELF"

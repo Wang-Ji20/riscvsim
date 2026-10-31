@@ -41,14 +41,20 @@ let dump_regs (cpu : Cpu.t) =
     cpu.f;
   if cpu.fflags <> 0 then eprintf "fflags = 0x%02x\n" cpu.fflags
 
-let run path rvc trace regs fuel =
+let run path args rvc trace regs fuel strace signature =
   match load_image ~rvc path with
   | Error e ->
       prerr_endline e;
       1
   | Ok img -> (
-      let cpu = Cpu.create () in
-      Cpu.load cpu img;
+      let os =
+        Os.boot ~argv:(path :: args)
+          ~env:(Array.to_list (Unix.environment ()))
+          ~exe:(Filename.concat (Sys.getcwd ()) path)
+          ?strace:(if strace then Some prerr_string else None)
+          img
+      in
+      let cpu = os.cpu in
       let trace =
         if trace then
           Some
@@ -59,6 +65,14 @@ let run path rvc trace regs fuel =
       in
       let outcome = Cpu.run ?fuel ?trace cpu in
       if regs then dump_regs cpu;
+      Option.iter
+        (fun file ->
+          match Os.signature cpu img with
+          | Some s ->
+              Out_channel.with_open_bin file (fun oc -> output_string oc s)
+          | None ->
+              prerr_endline "riscvsim: no begin_signature/end_signature symbols")
+        signature;
       match outcome with
       | Exited code -> code
       | Trapped { trap; pc } ->
@@ -122,9 +136,28 @@ let run_cmd =
       & opt (some int) None
       & info [ "fuel" ] ~docv:"N" ~doc:"Stop after $(docv) instructions.")
   in
+  let args =
+    Arg.(
+      value & pos_right 0 string []
+      & info [] ~docv:"ARGS" ~doc:"Arguments passed to the program.")
+  in
+  let strace =
+    Arg.(value & flag & info [ "strace" ] ~doc:"Log every syscall to stderr.")
+  in
+  let signature =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "signature" ] ~docv:"FILE"
+          ~doc:
+            "After the run, write the memory between $(b,begin_signature) and \
+             $(b,end_signature) to $(docv) (riscv-arch-test format).")
+  in
   Cmd.v
-    (Cmd.info "run" ~doc:"Assemble (if needed) and run a program.")
-    Term.(const run $ file $ rvc $ trace $ regs $ fuel)
+    (Cmd.info "run"
+       ~doc:"Assemble (if needed) and run a program as a Linux process.")
+    Term.(
+      const run $ file $ args $ rvc $ trace $ regs $ fuel $ strace $ signature)
 
 let asm_cmd =
   let output =

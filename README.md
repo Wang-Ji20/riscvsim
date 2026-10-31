@@ -46,14 +46,20 @@ lib/
   compressed.ml        RVC: expand 16-bit parcels, compress instructions
   fpu.ml               IEEE-754: all 5 rounding modes, fflags, NaN-boxing
   memory.ml            sparse little-endian 64-bit address space
-  cpu.ml               hart state, execute, CSRs, LR/SC, syscalls
+  cpu.ml               hart state, execute, CSRs, LR/SC; ecall goes to a hook
+  os.ml                Linux process: initial stack, fds, brk/mmap, syscall table
   lexer.ml parser.ml   GNU-style assembly syntax
   assembler.ml         two-pass assembler, pseudo-instructions, li, RVC
   elf.ml image.ml      ELF64 writer/loader, program images
   disasm.ml            mixed 16/32-bit disassembly
 bin/main.ml            cmdliner CLI
 examples/              10 sample programs + expected output
-test/                  QCheck properties, unit and golden tests, clang cross-check
+guest/libc/            rvlibc: freestanding C11 libc for guest programs
+guest/tests/           C programs for the three-way rvlibc/glibc/host test
+guest/ocamlrun/        cross-build script for OCaml's bytecode interpreter
+test/                  QCheck properties, unit and golden tests, clang cross-check,
+                       guest programs
+test/conformance/      riscv-tests environment, arch-test model, suite runner
 ```
 
 ## Design notes
@@ -65,12 +71,18 @@ test/                  QCheck properties, unit and golden tests, clang cross-che
   The CPU fetches a 16-bit parcel and decides from its low bits whether
   the instruction is compressed.
 - **Correct floating point in every rounding mode.** The host only rounds to
-  nearest-even. `Fpu` recovers each operation's exact rounding error with
-  error-free transforms (TwoSum, FMA residuals) and steps to the correct
-  neighbour for RTZ, RDN, RUP and RMM, which also gives exact `NX`/`OF`/`UF`
-  flags. Single precision rounds to odd in binary64 first, then rounds to
-  binary32, which is exact because 53 ≥ 2·24 + 2. One limitation: binary64
-  `fmadd` and friends honour only RNE.
+  nearest-even. `Fpu` describes each exact result by its RNE value, the sign
+  of the error and whether it's a tie, then steps to the correct neighbour
+  for RTZ, RDN, RUP and RMM. The error comes from:
+  - TwoSum for addition
+  - Boldo and Muller's ErrFma for fused multiply-add
+  - exact sign tests with Shewchuk expansions for products, quotients and
+    roots, which stay exact in the subnormal range
+  Overflowing results are rounded in a scaled domain (unbounded exponent),
+  so OF, UF and NX follow IEEE 754 to the letter, including the sign of
+  exact-zero sums under RDN. Single precision rounds to odd in binary64,
+  then to binary32. riscv-arch-test's 170 D-extension tests pass
+  bit-for-bit, flags included.
 - **The assembler's `li`** uses LLVM's algorithm (lui/addiw, then a
   recursive shift-and-add for 64-bit values). `la`, `call`, `tail` and
   `ld rd, sym` use `auipc` pairs, and `%hi`, `%lo`, `%pcrel_hi` and
@@ -80,14 +92,37 @@ test/                  QCheck properties, unit and golden tests, clang cross-che
   are known in pass 1. Label-relative branches stay 32-bit, because that
   avoids relaxation.
 
-## Syscalls (`ecall`)
+## Running real Linux programs
 
-The Linux RV64 ABI: `read` (63), `write` (64), `exit` (93), `exit_group`
-(94), `brk` (214), `close` (57). Unknown calls return `-ENOSYS`.
+`riscvsim run prog [args...]` runs a static RV64 Linux executable the way
+`qemu-user` does. `Os` builds the Linux initial stack (argc, argv, envp,
+auxv with `AT_PHDR`, `AT_RANDOM`, ...) and implements about 60 syscalls
+as a table of small handlers: files backed by the host filesystem, `brk`,
+`mmap`, `mremap`, time, `uname`, `getrandom`, and more. `--strace` logs
+each call by name, and the host environment is passed through.
 
-RARS-style debug calls, which keep the examples short: print_int (1),
-print_float (2), print_double (3), print_string (4), exit (10),
-print_char (11), print_hex (34), print_unsigned (36).
+```
+$ riscv64-suse-linux-gcc -static -O2 hello.c -o hello   # glibc 2.44
+$ riscvsim run hello world
+```
+
+Note that guest programs can read and write host files, as with
+`qemu-user`.
+
+Images built by riscvsim's assembler also get RARS-style debug calls:
+print_int (1), print_float (2), print_double (3), print_string (4),
+exit (10), print_char (11), print_hex (34), print_unsigned (36). They're
+enabled per image, because 34 and 36 collide with Linux's `mkdirat` and
+`symlinkat`.
+
+## rvlibc: a small libc of our own
+
+`guest/libc` is a freestanding C11 libc of about 900 lines, in the spirit
+of musl. It has a crt0 that reads the initial stack, raw `ecall` syscall
+wrappers, strings, a size-class `malloc` (with `brk`, plus `mmap` for
+large blocks), `qsort`, buffered stdio, and an exact `printf`: doubles are
+expanded to their full decimal value with a small bignum, so `%f`/`%e`/`%g`
+match glibc digit for digit.
 
 ## Tests
 
@@ -114,6 +149,24 @@ dune test
 - **Differential**: about 6,000 random instructions and 4,000 RVC candidates
   assembled by clang (`-march=rv64gc_zba_zbb_zbs`) must be byte-identical
   to ours. This step is skipped if clang isn't installed.
+- **Three-way guest programs** (`guest/tests/*.c`): each program is built
+  against rvlibc and against static glibc for riscv64, run on riscvsim,
+  and must print exactly what a native x86-64 build prints, with the same
+  exit status.
+
+### Conformance suites
+
+```
+dune build @conformance     # about 30 s; needs riscv64-suse-linux-gcc
+```
+
+| Suite | Result |
+|-------|--------|
+| riscv-tests: rv64u{i,m,a,f,d,c} and rv64uzba/zbb/zbs | 150 / 150 |
+| riscv-arch-test 2.7.4: I, M, C, D, Zifencei (vs reference signatures) | 265 / 265 (2 skipped: a toolchain incompatibility, and one test that needs M-mode traps) |
+
+The suites aren't vendored. Set `RISCV_TESTS` and `RISCV_ARCH_TEST`, or
+check them out under `../riscv-deps/`.
 
 During development the property tests caught a wrong `c.andi` funct2 field.
 QCheck shrank the failure to `andi s0, s0, 0`, and the exhaustive sweep and

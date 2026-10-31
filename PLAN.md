@@ -107,9 +107,48 @@ fixed.
 
 Known limitations:
 
-- binary64 FMA honours only RNE.
+- ~~binary64 FMA honours only RNE~~: fixed in Phase 0 (ErrFma).
 - Label-relative branches aren't compressed (no relaxation).
 - Speed is about 6 MIPS. See ROADMAP Phase 8.
 
 The next steps are in ROADMAP.md, starting with Phase 0.4–0.7 (official
 riscv-tests, then musl/OCaml binaries in user mode).
+
+---
+
+# Phase 0 completion (ROADMAP 0.4–0.7)
+
+Live checklist, updated as work lands.
+
+- [x] A. Toolchain: openSUSE `cross-riscv64-gcc15`, `cross-riscv64-binutils`,
+      `cross-riscv64-glibc-devel`. ~~Build Spike~~: building downloaded code
+      was blocked by the permission policy, so the reference signatures
+      shipped with arch-test 2.7.4 serve as the oracle instead (see D).
+- [x] B. Loader/ABI: Linux initial stack (argc, argv, envp, auxv with AT_PHDR,
+      AT_RANDOM, ...), guest argv from the CLI, program headers recorded by
+      the ELF reader
+- [x] C. 0.4 riscv-tests: a user-mode `test/conformance/riscv-tests-env`.
+      **150/150 pass** (rv64u{i,m,a,f,d,c} plus rv64uzba/zbb/zbs).
+- [x] D. 0.5 riscv-arch-test 2.7.4: `--signature` dump, M-mode CSR stubs,
+      and comparison against the shipped reference signatures. **265/265
+      pass** (I, M, C, D, Zifencei); 2 are skipped with reasons. Fixing the
+      FPU on the way: exact FMA error (ErrFma), exact comparisons via
+      Shewchuk expansions for subnormal results, IEEE overflow per rounding
+      mode, and the sign of exact-zero sums under RDN.
+- [x] E. 0.6 static C programs: our own libc (`guest/libc`, freestanding)
+      **and** static glibc, both checked against a native host build of
+      the same program. Linux syscalls (mmap, munmap, mprotect,
+      set_tid_address, writev, uname, getrandom, clock_gettime, newfstatat,
+      ioctl, ...)
+- [ ] F. 0.7 cross-build OCaml 5.4.1 `ocamlrun` (static, riscv64) and run
+      host-compiled bytecode programs on riscvsim. **Blocked**: the build
+      script (`guest/ocamlrun/build.sh`) is written, but compiling the
+      downloaded OCaml runtime sources was refused by the permission
+      policy. It needs the user's go-ahead. The file I/O, mmap, and other
+      syscalls it needs are already implemented and tested.
+- [x] G. `dune test` runs the unit/property tests, the clang
+      cross-check, and the three-way guest program comparison.
+      `dune build @conformance` runs riscv-tests and riscv-arch-test (in
+      about 30 s). Each step skips when its tools or suites are missing.
+      Clean-code pass done: `Os` syscalls are a table of small named
+      handlers, and rvlibc float formatting is split into helpers.

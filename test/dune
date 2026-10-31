@@ -15,3 +15,10 @@
  (name xcheck)
  (modules xcheck)
  (libraries riscv gen_instr qcheck-core))
+
+(test
+ (name guest_programs)
+ (modules guest_programs)
+ (libraries riscv unix)
+ (deps
+  (source_tree %{project_root}/guest)))

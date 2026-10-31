@@ -1,4 +1,4 @@
 (executable
  (name main)
  (public_name riscvsim)
- (libraries riscv cmdliner))
+ (libraries riscv cmdliner unix))

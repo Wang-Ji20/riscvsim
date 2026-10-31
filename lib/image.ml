@@ -11,10 +11,15 @@ type segment = {
   perm : perm;
 }
 
+type phdrs = { addr : int64; num : int; entsize : int }
+(** Where the ELF program headers are mapped, for the [AT_PHDR] auxv entry that
+    libc startup code reads. *)
+
 type t = {
   entry : int64;
   segments : segment list;
   symbols : (string * int64) list;
+  phdrs : phdrs option;
 }
 
 (** Highest address used by any segment: the initial program break. *)

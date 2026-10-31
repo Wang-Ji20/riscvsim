@@ -1,5 +1,5 @@
-(** A single RV64GC hart running user-mode code. [ecall] is serviced by the
-    simulator: the Linux RV64 syscall ABI, plus RARS-style debug calls. *)
+(** A single RV64GC hart. [ecall] is delegated to a pluggable handler (see {!Os}
+    for the Linux user-mode environment). *)
 
 open Instr
 
@@ -8,6 +8,7 @@ type trap =
   | Breakpoint
   | Misaligned_atomic of int64
   | Unknown_csr of int
+  | Unhandled_ecall
 
 exception Trap of trap
 
@@ -18,36 +19,7 @@ let pp_trap ppf = function
   | Misaligned_atomic a ->
       Format.fprintf ppf "misaligned atomic access at 0x%Lx" a
   | Unknown_csr c -> Format.fprintf ppf "access to unimplemented CSR 0x%03x" c
-
-type io = {
-  out : string -> unit;  (** fd 1 *)
-  err : string -> unit;  (** fd 2 *)
-  input : int -> string;  (** fd 0: read up to [n] bytes, [""] at EOF *)
-}
-(** Host I/O used by syscalls. *)
-
-let std_io =
-  {
-    out =
-      (fun s ->
-        print_string s;
-        flush stdout);
-    err =
-      (fun s ->
-        prerr_string s;
-        flush stderr);
-    input =
-      (fun n ->
-        let b = Bytes.create n in
-        Bytes.sub_string b 0 (input stdin b 0 n));
-  }
-
-let buffer_io buf =
-  {
-    out = Buffer.add_string buf;
-    err = Buffer.add_string buf;
-    input = (fun _ -> "");
-  }
+  | Unhandled_ecall -> Format.pp_print_string ppf "ecall with no environment"
 
 type t = {
   x : int64 array;  (** [x.(0)] is never written *)
@@ -58,14 +30,13 @@ type t = {
   mutable frm : int;
   mutable instret : int64;
   mutable reservation : int64 option;  (** LR/SC reservation address *)
-  mutable brk : int64;
   mutable exit_code : int option;
-  io : io;
+  mutable ecall : t -> unit;  (** environment call handler *)
+  mcsrs : (int, int64) Hashtbl.t;
+      (** machine-mode CSRs, as plain storage for now (ROADMAP phase 2) *)
 }
 
-let stack_top = 0x3f_ffff_f000L
-
-let create ?(io = std_io) () =
+let create () =
   {
     x = Array.make 32 0L;
     f = Array.make 32 0L;
@@ -75,25 +46,21 @@ let create ?(io = std_io) () =
     frm = 0;
     instret = 0L;
     reservation = None;
-    brk = 0L;
     exit_code = None;
-    io;
+    ecall = (fun _ -> raise (Trap Unhandled_ecall));
+    mcsrs = Hashtbl.create 16;
   }
 
-let page_align a = Int64.(logand (add a 4095L) (lognot 4095L))
-
-(** Load a program image. The stack starts at [stack_top]; [argc = 0] and empty
-    [argv]/[envp]/[auxv] follow it, since unwritten memory is zero. *)
+(** Copy a program image into memory and point [pc] at its entry. The stack and
+    process environment are the job of {!Os}. *)
 let load t (img : Image.t) =
   List.iter
     (fun (s : Image.segment) -> Memory.blit_bytes t.mem s.vaddr s.data)
     img.segments;
   t.pc <- img.entry;
-  t.x.(Reg.to_int Reg.sp) <- stack_top;
-  (match List.assoc_opt "__global_pointer$" img.symbols with
+  match List.assoc_opt "__global_pointer$" img.symbols with
   | Some gp -> t.x.(Reg.to_int Reg.gp) <- gp
-  | None -> ());
-  t.brk <- page_align (Image.end_address img)
+  | None -> ()
 
 (* {1 Register access} *)
 
@@ -319,64 +286,26 @@ let csr_read t csr =
   | 0x002 -> Int64.of_int t.frm
   | 0x003 -> Int64.of_int ((t.frm lsl 5) lor t.fflags)
   | 0xc00 | 0xc01 | 0xc02 -> t.instret (* cycle = time = instret *)
+  | 0x301 (* misa: RV64 IMAFDC + U *) ->
+      Int64.(logor (shift_left 2L 62) (of_int 0x10112d))
+  | 0xf11 | 0xf12 | 0xf13 | 0xf14 (* vendor/arch/impl ids, hart id *) -> 0L
+  | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
+      Option.value ~default:0L (Hashtbl.find_opt t.mcsrs csr)
   | _ -> raise (Trap (Unknown_csr csr))
 
-let csr_write t csr v =
-  let v = Int64.to_int v in
+let csr_write t csr v64 =
+  let v = Int64.to_int v64 in
   match csr with
   | 0x001 -> t.fflags <- v land 0x1f
   | 0x002 -> t.frm <- v land 0x7
   | 0x003 ->
       t.fflags <- v land 0x1f;
       t.frm <- (v lsr 5) land 0x7
+  | 0x301 -> () (* misa is WARL; writes ignored *)
+  | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
+      Hashtbl.replace t.mcsrs csr v64
   | _ -> raise (Trap (Unknown_csr csr))
 (* counters are read-only *)
-
-(* {1 Syscalls} *)
-
-let enosys = -38L
-let ebadf = -9L
-
-let syscall t =
-  let a n = t.x.(10 + n) in
-  let ret v = t.x.(10) <- v in
-  let num = Int64.to_int t.x.(17) in
-  match num with
-  (* Linux RV64 *)
-  | 63 (* read *) ->
-      if a 0 <> 0L then ret ebadf
-      else
-        let s = t.io.input (Int64.to_int (a 2)) in
-        Memory.blit_bytes t.mem (a 1) (Bytes.of_string s);
-        ret (Int64.of_int (String.length s))
-  | 64 (* write *) -> (
-      let data () =
-        Bytes.to_string (Memory.read_bytes t.mem (a 1) (Int64.to_int (a 2)))
-      in
-      match a 0 with
-      | 1L ->
-          t.io.out (data ());
-          ret (a 2)
-      | 2L ->
-          t.io.err (data ());
-          ret (a 2)
-      | _ -> ret ebadf)
-  | 93 | 94 (* exit, exit_group *) ->
-      t.exit_code <- Some (Int64.to_int (a 0) land 0xff)
-  | 214 (* brk *) ->
-      if Int64.unsigned_compare (a 0) t.brk > 0 then t.brk <- a 0;
-      ret t.brk
-  | 57 (* close *) -> ret 0L
-  (* RARS-style debug calls *)
-  | 1 -> t.io.out (Int64.to_string (a 0))
-  | 2 -> t.io.out (Fpu.string_of_single (get_s t (Freg.of_int 10)))
-  | 3 -> t.io.out (Fpu.string_of_double (Int64.float_of_bits t.f.(10)))
-  | 4 -> t.io.out (Memory.read_cstring t.mem (a 0))
-  | 10 -> t.exit_code <- Some 0
-  | 11 -> t.io.out (String.make 1 (Char.chr (Int64.to_int (a 0) land 0xff)))
-  | 34 -> t.io.out (Printf.sprintf "0x%016Lx" (a 0))
-  | 36 -> t.io.out (Printf.sprintf "%Lu" (a 0))
-  | _ -> ret enosys
 
 (* {1 Floating point} *)
 
@@ -553,7 +482,7 @@ let execute t (i : Instr.t) ~pc ~len ~bits =
         next
     | Fence _ | Fence_i -> next
     | Ecall ->
-        syscall t;
+        t.ecall t;
         next
     | Ebreak -> raise (Trap Breakpoint)
     | Csr { op; rd; src; csr } ->

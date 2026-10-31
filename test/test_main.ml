@@ -37,8 +37,7 @@ let assemble ?rvc src =
 
 let run_image ?(fuel = 10_000_000) img =
   let buf = Buffer.create 256 in
-  let cpu = Cpu.create ~io:(Cpu.buffer_io buf) () in
-  Cpu.load cpu img;
+  let cpu = (Os.boot ~io:(Os.buffer_io buf) img).cpu in
   let outcome = Cpu.run ~fuel cpu in
   (Buffer.contents buf, outcome, cpu)
 
@@ -211,7 +210,7 @@ let prop_li =
     ~print:Int64.to_string int64_interesting (fun v ->
       let rd = Reg.of_int 10 in
       let seq = Assembler.li_sequence rd v in
-      let cpu = Cpu.create ~io:(Cpu.buffer_io (Buffer.create 1)) () in
+      let cpu = Cpu.create () in
       List.iter (fun i -> Cpu.execute cpu i ~pc:0L ~len:4 ~bits:0) seq;
       List.length seq <= 8 && Cpu.get cpu rd = v)
 
@@ -349,6 +348,53 @@ let prop_fp_directed =
             && (rmm = rdn || rmm = rup))
         [ Fadd; Fsub; Fmul; Fdiv ])
 
+(** FMA against an exact integer model: operands are [i * 2^k] with small [i]
+    and [k], so [a*b + c] scaled by [2^-E] is an exact [int64]. *)
+let prop_fma_exact =
+  let operand bits lo hi =
+    G.pair (G.int_range (-(1 lsl bits)) (1 lsl bits)) (G.int_range lo hi)
+  in
+  let gen =
+    G.triple (operand 20 (-5) 5) (operand 20 (-5) 5) (operand 40 (-10) 10)
+  in
+  let print ((ia, ea), (ib, eb), (ic, ec)) =
+    Printf.sprintf "%d*2^%d * %d*2^%d + %d*2^%d" ia ea ib eb ic ec
+  in
+  T.make ~name:"fmadd.d rounds the exact a*b+c correctly in all modes (with NX)"
+    ~count:5000 ~print gen (fun ((ia, ea), (ib, eb), (ic, ec)) ->
+      let scale = min (ea + eb) ec in
+      let exact = (ia * (ib lsl (ea + eb - scale))) + (ic lsl (ec - scale)) in
+      let a = Float.ldexp (float ia) ea
+      and b = Float.ldexp (float ib) eb
+      and c = Float.ldexp (float ic) ec in
+      let bits = Int64.bits_of_float in
+      let ours rm = Fpu.fma Fpu.double rm Fmadd (bits a) (bits b) (bits c) in
+      let rne = Float.fma a b c in
+      let scaled f = Int64.to_int (Int64.of_float (Float.ldexp f (-scale))) in
+      let diff = compare exact (scaled rne) in
+      let up = if diff > 0 then Float.succ rne else rne
+      and down = if diff < 0 then Float.pred rne else rne in
+      let tie =
+        diff <> 0
+        && 2 * abs (exact - scaled rne)
+           = abs (scaled (if diff > 0 then up else down) - scaled rne)
+      in
+      let expect = function
+        | Rne | Dyn -> rne
+        | Rdn -> down
+        | Rup -> up
+        | Rtz -> if rne > 0. then down else up
+        | Rmm ->
+            if tie && Float.abs (if diff > 0 then up else down) > Float.abs rne
+            then if diff > 0 then up else down
+            else rne
+      in
+      List.for_all
+        (fun rm ->
+          let result, flags = ours rm in
+          result = bits (expect rm) && flags land Fpu.nx <> 0 = (diff <> 0))
+        [ Rne; Rtz; Rdn; Rup; Rmm ])
+
 let prop_fp_single =
   T.make
     ~name:
@@ -447,7 +493,7 @@ let prop_rvc_programs =
 
 let properties =
   [ prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
-    prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fp_single;
+    prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 
 (* {1 Example-based tests} *)

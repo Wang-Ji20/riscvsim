@@ -8,8 +8,7 @@
     binary32 in the requested mode, which is provably correct because 53 >= 24 +
     2.
 
-    Known limitation: [fma] is correctly rounded only for RNE, and doesn't
-    report NX. *)
+    Fused multiply-add uses Boldo and Muller's ErrFma for its exact error. *)
 
 open Instr
 
@@ -50,13 +49,16 @@ let is_snan_d b = is_nan_d b && Int64.logand b 0x0008000000000000L = 0L
 
 (* {1 Inexact results}
 
-   An operation's exact (infinitely precise) result is described by its
-   round-to-nearest-even value [r], the sign of [exact - r], and whether the
-   exact value lies exactly halfway between [r] and its neighbour. *)
+   An operation's exact (infinitely precise) result is [x * 2^scale], where
+   [x] is described by its round-to-nearest-even value [r], the sign of
+   [x - r], and whether [x] lies exactly halfway between [r] and its
+   neighbour. [scale] is non-zero only for results that overflow: they are
+   computed in a scaled-down domain, rounded there (that is, with an
+   unbounded exponent, as IEEE 754 defines overflow), and scaled back. *)
 
-type approx = { r : float; err : int; tie : bool }
+type approx = { r : float; err : int; tie : bool; scale : int }
 
-let exact r = { r; err = 0; tie = false }
+let exact r = { r; err = 0; tie = false; scale = 0 }
 let sign x = if x > 0. then 1 else if x < 0. then -1 else 0
 
 (** The float adjacent to [r] in the direction [dir] (+1 or -1). *)
@@ -67,48 +69,183 @@ let make_approx r err_val =
   if err = 0 then exact r
   else
     let n = step r err in
-    { r; err; tie = 2. *. Float.abs err_val = Float.abs (n -. r) }
+    { r; err; tie = 2. *. Float.abs err_val = Float.abs (n -. r); scale = 0 }
+
+(** Knuth's TwoSum: [s + e = a + b] exactly, with [s = RN(a + b)]. *)
+let two_sum a b =
+  let s = a +. b in
+  let bb = s -. a in
+  (s, a -. (s -. bb) +. (b -. bb))
 
 (** Approximations for the basic operations, given finite operands. *)
 let add a b =
-  let r = a +. b in
-  if Float.is_finite r then
-    let bb = r -. a in
-    make_approx r (a -. (r -. bb) +. (b -. bb))
+  let r, e = two_sum a b in
+  if Float.is_finite r then make_approx r e
   else if Float.is_finite a && Float.is_finite b then
-    (* overflow: the exact value is finite, just below/above the infinity *)
-    { r; err = -sign r; tie = false }
+    (* overflow: halving is exact for numbers this large *)
+    let r', e' = two_sum (a /. 2.) (b /. 2.) in
+    { (make_approx r' e') with scale = 1 }
   else exact r
+
+(* {2 Exact comparisons by floating-point expansions}
+
+   An expansion is a list of floats, in increasing magnitude, whose exact
+   sum represents a number and whose components don't overlap (Shewchuk,
+   "Adaptive precision floating-point arithmetic", 1997). The largest
+   nonzero component determines the sign of the sum. That lets us decide
+   [sign (exact - candidate)] exactly for products, quotients and roots,
+   as long as every intermediate stays in the normal range. *)
+
+let two_prod a b =
+  let p = a *. b in
+  (p, Float.fma a b (-.p))
+
+(** Shewchuk's Grow-Expansion: add [b] to the expansion [e]. *)
+let grow_expansion e b =
+  let q, hs =
+    List.fold_left
+      (fun (q, hs) x ->
+        let s, h = two_sum q x in
+        (s, h :: hs))
+      (b, []) e
+  in
+  List.rev (q :: hs)
+
+(** The exact sign of a sum of floats. *)
+let sign_of_sum terms =
+  List.fold_left grow_expansion [] terms
+  |> List.fold_left (fun acc x -> if x <> 0. then sign x else acc) 0
+
+(** [v = m * 2^-k] with [m] in [0.5, 1): returns [(m, k)]. *)
+let normalise v =
+  let _, e = Float.frexp v in
+  (Float.ldexp v (-e), -e)
+
+(** Describe the exact result of an operation, given its RNE value [r] and a
+    comparator [exact_minus ts = sign (exact * 2^domain - sum ts)]. *)
+let approx_by_comparison r ~domain ~exact_minus =
+  let up v = Float.ldexp v domain in
+  let err = exact_minus [ up r ] in
+  if err = 0 then exact r
+  else
+    let half = (up (step r err) -. up r) /. 2. in
+    { r; err; tie = exact_minus [ up r; half ] = 0; scale = 0 }
+
+let negate_all = List.map Float.neg
+
+(* {2 Products, quotients, roots, fused multiply-add} *)
+
+let all_finite = List.for_all Float.is_finite
 
 let mul a b =
   let r = a *. b in
-  if Float.is_finite r then make_approx r (Float.fma a b (-.r))
-  else if Float.is_finite a && Float.is_finite b then
-    { r; err = -sign r; tie = false }
-  else exact r
+  if (not (all_finite [ a; b ])) || a = 0. || b = 0. then exact r
+  else
+    let a', ka = normalise a and b', kb = normalise b in
+    let p, e = two_prod a' b' in
+    if Float.is_finite r then
+      approx_by_comparison r ~domain:(ka + kb) ~exact_minus:(fun ts ->
+          sign_of_sum (p :: e :: negate_all ts))
+    else { (make_approx p e) with scale = -(ka + kb) }
 
 let div a b =
   let r = a /. b in
-  if Float.is_finite r && r <> 0. && Float.is_finite a && b <> 0. then
-    (* remainder a - r*b is exact; division never produces exact ties *)
-    let rem = Float.fma (-.r) b a in
-    { r; err = sign rem * sign b; tie = false }
-  else if
-    Float.is_finite a && Float.is_finite b && b <> 0. && not (Float.is_finite r)
-  then { r; err = -sign r; tie = false }
-  else if r = 0. && a <> 0. && Float.is_finite b then
-    (* underflow to zero *)
-    { r; err = sign a * sign b; tie = false }
-  else exact r
+  if (not (all_finite [ a; b ])) || a = 0. || b = 0. then exact r
+  else
+    (* a'/b' - t has the sign of (a' - b' t) * sign b' *)
+    let a', ka = normalise a and b', kb = normalise b in
+    let exact_minus ts =
+      let products =
+        List.concat_map
+          (fun t ->
+            let p, e = two_prod b' t in
+            [ -.p; -.e ])
+          ts
+      in
+      sign_of_sum (a' :: products) * sign b'
+    in
+    if Float.is_finite r then
+      approx_by_comparison r ~domain:(ka - kb) ~exact_minus
+    else
+      {
+        (approx_by_comparison (a' /. b') ~domain:0 ~exact_minus) with
+        scale = kb - ka;
+      }
 
 let sqrt a =
   let r = Float.sqrt a in
-  if Float.is_finite r && r > 0. then
-    { r; err = sign (Float.fma (-.r) r a); tie = false }
-  else exact r
+  if (not (Float.is_finite r)) || r <= 0. then exact r
+  else
+    (* scale by an even power of two: sqrt (a 2^2k) = sqrt a * 2^k *)
+    let _, e = Float.frexp a in
+    let k = -(e / 2) in
+    let a' = Float.ldexp a (2 * k) in
+    approx_by_comparison r ~domain:k ~exact_minus:(fun ts ->
+        (* sqrt a' - t has the sign of a' - t^2 (t >= 0); t^2 = sum of t_i t_j *)
+        let squares =
+          List.concat_map
+            (fun (x, y) ->
+              let p, e = two_prod x y in
+              [ -.p; -.e ])
+            (List.concat_map (fun x -> List.map (fun y -> (x, y)) ts) ts)
+        in
+        sign_of_sum (a' :: squares))
+
+(** [fma a b c] with its exact error, by Boldo and Muller's ErrFma ("Exact and
+    approximated error of the FMA", IEEE TC 2011): [a*b + c = r1 + r2 + r3]
+    exactly, with [r2 = RN(r2 + r3)]. So [r2] carries the error's sign, and
+    there is a tie only if [r3 = 0] and [r2] is exactly half an ulp. Exact
+    unless intermediates underflow; tiny results are therefore decided by exact
+    comparison in a scaled domain. *)
+let err_fma a b c r1 =
+  let u1, u2 = two_prod a b in
+  let alpha1, alpha2 = two_sum c u2 in
+  let beta1, beta2 = two_sum u1 alpha1 in
+  let gamma = beta1 -. r1 +. beta2 in
+  let r2 = gamma +. alpha2 in
+  let r3 = alpha2 -. (r2 -. gamma) in
+  let ap = make_approx r1 r2 in
+  { ap with tie = ap.tie && r3 = 0. }
+
+let tiny = Float.ldexp 1. (-960)
+
+(** An FMA whose product or result overflows: scale the larger factor and [c]
+    down so nothing does. Gives up only if [c] would lose bits. *)
+let scaled_fma a b c r1 =
+  let exponent v = snd (Float.frexp v) in
+  let k = 1000 - (exponent a + exponent b) in
+  let a, b =
+    if exponent a >= exponent b then (Float.ldexp a k, b)
+    else (a, Float.ldexp b k)
+  in
+  let c' = Float.ldexp c k in
+  if Float.ldexp c' (-k) = c then
+    { (err_fma a b c' (Float.fma a b c')) with scale = -k }
+  else { r = r1; err = -sign r1; tie = false; scale = 0 }
+(* approximate *)
+
+let fma_approx a b c =
+  let r1 = Float.fma a b c in
+  if not (all_finite [ a; b; c ]) then exact r1
+  else if a = 0. || b = 0. then exact r1
+  else if not (Float.is_finite r1 && Float.is_finite (a *. b)) then
+    scaled_fma a b c r1
+  else
+    let a', ka = normalise a and b', kb = normalise b in
+    let c' = Float.ldexp c (ka + kb) in
+    let c_scales_exactly =
+      Float.is_finite c' && Float.ldexp c' (-(ka + kb)) = c
+    in
+    if
+      Float.abs r1 >= tiny || Float.abs (a *. b) >= tiny || not c_scales_exactly
+    then err_fma a b c r1
+    else
+      let p, e = two_prod a' b' in
+      approx_by_comparison r1 ~domain:(ka + kb) ~exact_minus:(fun ts ->
+          sign_of_sum (p :: e :: c' :: negate_all ts))
 
 (** Round an approximation to binary64 in mode [rm]. *)
-let round_d rm { r; err; tie } =
+let round_d rm { r; err; tie; _ } =
   if err = 0 then r
   else
     let toward dir = if err = dir then step r err else r in
@@ -123,7 +260,25 @@ let round_d rm { r; err; tie } =
         (* ties away from zero; RNE already chose correctly otherwise *)
         if tie && Float.abs (step r err) > Float.abs r then step r err else r
 
-(** Round to odd: truncate, then set the lsb if inexact. *)
+(** The IEEE 754 overflow result for each rounding mode. *)
+let overflow_result rm ~negative =
+  let inf = if negative then Float.neg_infinity else Float.infinity in
+  let max = if negative then -.Float.max_float else Float.max_float in
+  match rm with
+  | Rne | Rmm | Dyn -> inf
+  | Rtz -> max
+  | Rdn -> if negative then inf else max
+  | Rup -> if negative then max else inf
+
+(** Round to binary64, returning the result and whether it overflowed. *)
+let round_double rm a =
+  let r' = round_d rm a in
+  let r = Float.ldexp r' a.scale in
+  if Float.is_finite r || (a.err = 0 && a.scale = 0) then (r, false)
+  else (overflow_result rm ~negative:(Float.sign_bit r'), true)
+
+(** Round to odd: truncate, then set the lsb if inexact. Only used for binary32
+    results, which never need scaling in binary64. *)
 let round_odd ({ r; err; _ } as a) =
   if err = 0 then r
   else
@@ -318,6 +473,7 @@ type 'b format = {
   canonical : 'b;
   round : rm -> approx -> 'b * bool * bool;  (** bits, inexact, overflow *)
   min_normal : float;
+  narrow : bool;  (** binary32: products of two operands are exact in binary64 *)
 }
 
 let double =
@@ -328,11 +484,10 @@ let double =
     canonical = canonical_nan_d;
     round =
       (fun rm a ->
-        let r = round_d rm a in
-        ( Int64.bits_of_float r,
-          a.err <> 0,
-          a.err <> 0 && not (Float.is_finite a.r) ));
+        let r, overflow = round_double rm a in
+        (Int64.bits_of_float r, a.err <> 0, overflow));
     min_normal = min_normal_d;
+    narrow = false;
   }
 
 let single =
@@ -346,8 +501,13 @@ let single =
         let d = round_odd a in
         let s = round_s rm d in
         let inexact = a.err <> 0 || d_of_s s <> d in
-        (s, inexact, inexact && not (Float.is_finite (d_of_s (round_s Rne d)))));
+        (* overflow iff rounding with an unbounded exponent exceeds max *)
+        let overflow =
+          inexact && (Float.abs d >= 0x1p128 || not (Float.is_finite (d_of_s s)))
+        in
+        (s, inexact, overflow));
     min_normal = min_normal_s;
+    narrow = true;
   }
 
 let finish fm rm ?(extra = 0) ap =
@@ -359,6 +519,15 @@ let finish fm rm ?(extra = 0) ap =
       lor rounding_flags ~min_normal:fm.min_normal ~inexact ~overflow
             (fm.to_float bits) )
 
+(** IEEE 754 6.3: when a sum is exactly zero and the addends aren't both +0, the
+    result is +0 except under round-toward-negative, where it is -0. The host
+    already computed the RNE answer, so only RDN needs fixing. *)
+let signed_zero_sum rm (p, q) ap =
+  let is_pos_zero v = v = 0. && not (Float.sign_bit v) in
+  if rm = Rdn && ap.err = 0 && ap.r = 0. && not (is_pos_zero p && is_pos_zero q)
+  then { ap with r = -0. }
+  else ap
+
 let snan_flag fm xs = if List.exists fm.is_snan xs then nv else 0
 
 let arith fm rm op a b =
@@ -367,8 +536,8 @@ let arith fm rm op a b =
     let x = fm.to_float a and y = fm.to_float b in
     let ap =
       match op with
-      | Fadd -> add x y
-      | Fsub -> add x (-.y)
+      | Fadd -> signed_zero_sum rm (x, y) (add x y)
+      | Fsub -> signed_zero_sum rm (x, -.y) (add x (-.y))
       | Fmul -> mul x y
       | Fdiv -> div x y
     in
@@ -385,30 +554,21 @@ let fsqrt fm rm a =
 
 let fma fm rm op a b c =
   if List.exists fm.is_nan [ a; b; c ] then
-    let x = fm.to_float a and y = fm.to_float b in
     let inf_times_zero =
       (not (fm.is_nan a || fm.is_nan b))
-      && ((Float.is_integer x && x = 0. && Float.abs y = Float.infinity)
-         || (y = 0. && Float.abs x = Float.infinity))
+      &&
+      let x = fm.to_float a and y = fm.to_float b in
+      let is_inf v = Float.abs v = Float.infinity in
+      (x = 0. && is_inf y) || (y = 0. && is_inf x)
     in
     (fm.canonical, snan_flag fm [ a; b; c ] lor if inf_times_zero then nv else 0)
   else
     let x = fm.to_float a and y = fm.to_float b and z = fm.to_float c in
     let x = match op with Fnmsub | Fnmadd -> -.x | _ -> x in
     let z = match op with Fmsub | Fnmadd -> -.z | _ -> z in
-    let ap =
-      if fm.min_normal = min_normal_s then
-        (* product of two singles is exact in binary64: TwoSum is exact *)
-        add (x *. y) z
-      else
-        let r = Float.fma x y z in
-        if
-          Float.is_finite r
-          || not (Float.is_finite x && Float.is_finite y && Float.is_finite z)
-        then exact r
-        else { r; err = -sign r; tie = false }
-    in
-    finish fm rm ap
+    (* binary32: the product is exact in binary64, so TwoSum is exact *)
+    let ap = if fm.narrow then add (x *. y) z else fma_approx x y z in
+    finish fm rm (signed_zero_sum rm (x *. y, z) ap)
 
 let min_max fm ~is_max a b =
   let flags = snan_flag fm [ a; b ] in

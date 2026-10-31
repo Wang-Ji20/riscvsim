@@ -1,2 +1,3 @@
 (library
- (name riscv))
+ (name riscv)
+ (libraries unix))
