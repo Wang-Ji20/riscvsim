@@ -716,8 +716,28 @@ let test_semantics () =
         = List.map (fun (s : Image.segment) -> (s.vaddr, s.data)) img.segments)
   | Error e -> check ("ELF read: " ^ e) false
 
+(** FPU cases where riscvsim once disagreed with Spike (found by
+    test/spike); each row is (description, op, a, b, c, rm, result, flags). *)
+let spike_fpu_regressions =
+  [ ( "fmadd.d: product far below c's ulp still sets NX and rounds up",
+      Fmadd, 0x1e60000000000000L, 0x1aff8b1aecaabda7L, 0x7761f8528ef497f3L, Rup,
+      0x7761f8528ef497f4L, Fpu.nx );
+    ( "fnmadd.d: overflowing product with c below its ulp sets OF under RDN",
+      Fnmadd, 0x6c81b5e4eca24a0cL, 0xe8a9b915ec868722L, 0x931df157a95ce1f0L, Rdn,
+      0x7fefffffffffffffL, Fpu.ofl lor Fpu.nx ) ]
+[@@ocamlformat "disable"]
+
+let test_fpu_regressions () =
+  section "FPU regressions found by Spike differential testing";
+  List.iter
+    (fun (what, op, a, b, c, rm, result, flags) ->
+      let r, f = Fpu.fma Fpu.double rm op a b c in
+      check_eq ~pp:(fun (r, f) -> Printf.sprintf "0x%Lx flags=0x%x" r f) what (result, flags) (r, f))
+    spike_fpu_regressions
+
 let () =
   test_rvc_exhaustive ();
+  test_fpu_regressions ();
   test_assembler_errors ();
   test_semantics ();
   test_examples ();

@@ -209,9 +209,21 @@ let err_fma a b c r1 =
 
 let tiny = Float.ldexp 1. (-960)
 
+(** Add a nonzero term far smaller than half an ulp of the exact value that [ap]
+    describes: it can only decide the sign of the error, or break a tie. If it
+    pushes a tie past the midpoint, the RNE value moves to the other neighbour.
+*)
+let with_sticky ap ~sign:s =
+  if s = 0 then ap
+  else if ap.err = 0 then { ap with err = s }
+  else if ap.tie && s = ap.err then
+    { ap with r = step ap.r ap.err; err = -ap.err; tie = false }
+  else { ap with tie = false }
+
 (** An FMA whose product or result overflows: scale the larger factor and [c]
-    down so nothing does. Gives up only if [c] would lose bits. *)
-let scaled_fma a b c r1 =
+    down so nothing does. If [c] can't be scaled exactly, it's far below the
+    product's ulp and acts as a sticky bit. *)
+let scaled_fma a b c =
   let exponent v = snd (Float.frexp v) in
   let k = 1000 - (exponent a + exponent b) in
   let a, b =
@@ -219,26 +231,34 @@ let scaled_fma a b c r1 =
     else (a, Float.ldexp b k)
   in
   let c' = Float.ldexp c k in
-  if Float.ldexp c' (-k) = c then
-    { (err_fma a b c' (Float.fma a b c')) with scale = -k }
-  else { r = r1; err = -sign r1; tie = false; scale = 0 }
-(* approximate *)
+  let ap =
+    if Float.ldexp c' (-k) = c then err_fma a b c' (Float.fma a b c')
+    else
+      let p, e = two_prod a b in
+      with_sticky (make_approx p e) ~sign:(sign c)
+  in
+  { ap with scale = -k }
 
 let fma_approx a b c =
   let r1 = Float.fma a b c in
   if not (all_finite [ a; b; c ]) then exact r1
   else if a = 0. || b = 0. then exact r1
   else if not (Float.is_finite r1 && Float.is_finite (a *. b)) then
-    scaled_fma a b c r1
+    scaled_fma a b c
   else
     let a', ka = normalise a and b', kb = normalise b in
     let c' = Float.ldexp c (ka + kb) in
     let c_scales_exactly =
       Float.is_finite c' && Float.ldexp c' (-(ka + kb)) = c
     in
-    if
-      Float.abs r1 >= tiny || Float.abs (a *. b) >= tiny || not c_scales_exactly
-    then err_fma a b c r1
+    let product_tiny = Float.abs (a *. b) < tiny in
+    if (not product_tiny) && Float.abs r1 >= tiny then err_fma a b c r1
+    else if not c_scales_exactly then
+      if product_tiny then
+        (* c is so large that the product is below half an ulp of it: the
+           result is c, and the product only decides the error's sign *)
+        with_sticky (exact r1) ~sign:(sign a * sign b)
+      else err_fma a b c r1
     else
       let p, e = two_prod a' b' in
       approx_by_comparison r1 ~domain:(ka + kb) ~exact_minus:(fun ts ->
