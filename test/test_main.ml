@@ -724,6 +724,9 @@ let spike_fpu_regressions =
       0x7761f8528ef497f4L, Fpu.nx );
     ( "fnmadd.d: overflowing product with c below its ulp sets OF under RDN",
       Fnmadd, 0x6c81b5e4eca24a0cL, 0xe8a9b915ec868722L, 0x931df157a95ce1f0L, Rdn,
+      0x7fefffffffffffffL, Fpu.ofl lor Fpu.nx );
+    ( "fnmsub.d: finite product, overflowing sum rounds to max_float under RTZ",
+      Fnmsub, 0xcf3cfdbff162e068L, 0x6f139457560b6b8eL, 0x7fefffffffffffffL, Rtz,
       0x7fefffffffffffffL, Fpu.ofl lor Fpu.nx ) ]
 [@@ocamlformat "disable"]
 

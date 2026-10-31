@@ -221,11 +221,13 @@ let with_sticky ap ~sign:s =
   else { ap with tie = false }
 
 (** An FMA whose product or result overflows: scale the larger factor and [c]
-    down so nothing does. If [c] can't be scaled exactly, it's far below the
-    product's ulp and acts as a sticky bit. *)
+    down so nothing does. Scaling by at least 2^-2 keeps even
+    [max_float + max_float] finite; a product that overflows needs more. If [c]
+    can't be scaled exactly, it's far below the product's ulp and acts as a
+    sticky bit. *)
 let scaled_fma a b c =
   let exponent v = snd (Float.frexp v) in
-  let k = 1000 - (exponent a + exponent b) in
+  let k = min (-2) (1000 - (exponent a + exponent b)) in
   let a, b =
     if exponent a >= exponent b then (Float.ldexp a k, b)
     else (a, Float.ldexp b k)

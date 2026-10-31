@@ -160,3 +160,5 @@ Live checklist, updated as work lands.
 - [x] Random differential testing against Spike (`dune build @spike`).
       Found and fixed two FMA flag bugs: an underflowing product as a
       sticky bit, and OF lost when c is below the product's ulp
+- [x] A 1.3M-instruction run (seed 99) found a third FMA bug: a finite
+      product with an overflowing sum. The scaled path now always scales down.
