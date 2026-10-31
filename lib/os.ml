@@ -54,6 +54,7 @@ type t = {
   exe : string;  (** what /proc/self/exe resolves to *)
   debug_calls : bool;
   strace : (string -> unit) option;
+  tohost : int64 option;  (** HTIF [tohost] address, for bare-metal tests *)
 }
 
 let stack_top = 0x3f_ffff_f000L
@@ -704,10 +705,38 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
         (match exe with Some e -> e | None -> List.hd (argv @ [ "a.out" ]));
       debug_calls = List.mem_assoc "__riscvsim_debug_calls" img.symbols;
       strace;
+      tohost = List.assoc_opt "tohost" img.symbols;
     }
   in
   cpu.ecall <- (fun _ -> syscall t);
   t
+
+(* {1 Running} *)
+
+(** HTIF exit request: bare-metal test programs (built for Spike) halt by
+    storing [(code lsl 1) lor 1] to the [tohost] symbol. *)
+let htif_exit t =
+  Option.bind t.tohost (fun addr ->
+      let v = Memory.load t.cpu.mem addr 8 in
+      if Int64.logand v 1L = 1L then
+        Some (Int64.to_int (Int64.shift_right_logical v 1) land 0xff)
+      else None)
+
+(** Like {!Cpu.run}, but also honours HTIF exits. Like Spike, it polls [tohost]
+    between slices of instructions rather than on every store. *)
+let run ?(fuel = max_int) ?trace t =
+  let slice = 10_000 in
+  let rec loop remaining =
+    match Cpu.run ~fuel:(min slice remaining) ?trace t.cpu with
+    | Cpu.Out_of_fuel -> (
+        match htif_exit t with
+        | Some code -> Cpu.Exited code
+        | None ->
+            if remaining > slice then loop (remaining - slice)
+            else Cpu.Out_of_fuel)
+    | outcome -> outcome
+  in
+  if t.tohost = None then Cpu.run ~fuel ?trace t.cpu else loop fuel
 
 (** The words between [begin_signature] and [end_signature], one per line as 8
     hex digits: the riscv-arch-test signature format. *)

@@ -632,6 +632,19 @@ let test_semantics () =
     | _ -> false);
   let _, outcome, _ = run_source "loop: j loop" ~fuel:1000 in
   check "fuel limit" (outcome = Cpu.Out_of_fuel);
+  let htif =
+    Os.boot
+      ~io:(Os.buffer_io (Buffer.create 16))
+      (assemble
+         "li t0, 7\n\
+          la t1, tohost\n\
+          sd t0, 0(t1)\n\
+          spin: j spin\n\
+          .data\n\
+          tohost: .dword 0")
+  in
+  check "HTIF tohost write (3 << 1 | 1) exits with status 3"
+    (Os.run ~fuel:100_000 htif = Cpu.Exited 3);
   let cpu =
     regs_after
       "li t0, 3\n\

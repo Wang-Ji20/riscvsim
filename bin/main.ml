@@ -63,7 +63,7 @@ let run path args rvc trace regs fuel strace signature =
               Printf.eprintf "  %8Lx: %s\n%!" pc (Instr.to_string i))
         else None
       in
-      let outcome = Cpu.run ?fuel ?trace cpu in
+      let outcome = Os.run ?fuel ?trace os in
       if regs then dump_regs cpu;
       Option.iter
         (fun file ->
