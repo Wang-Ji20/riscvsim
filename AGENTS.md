@@ -73,6 +73,28 @@ They record what the maintainer and the agent have agreed on.
   `test/test_main.ml` before it's fixed.
 - Every bug fixed gets a regression test.
 
+## Documentation
+
+- **Every commit keeps the docs current.** If a commit changes behaviour,
+  commands, interfaces or design, the same commit updates the affected
+  docs: `docs/`, `README.md`, `PLAN.md`, `ROADMAP.md`.
+- Documentation lives in `docs/`:
+  - `README.md`: index and reading order
+  - `glossary.md`: plain-language definitions of every technical term
+  - `user-manual.md`: how to build, run and test
+  - `architecture.md`: the big picture: components and how data flows
+  - `design/`: one document per subsystem, explaining *why* it is built
+    this way (decisions, alternatives, trade-offs), not just *what*
+  - `perf/`: performance goals, method and results
+- **Style:** clear, concise English. Short sentences and short
+  paragraphs, not dense. Prefer a small example over an abstract
+  explanation. Use ASCII diagrams inside Markdown.
+- **Self-contained:** a reader with general computer knowledge (what a
+  CPU, memory, a compiler and a file are) can follow every document
+  without prior RISC-V, OCaml or emulator expertise. Define terms on first
+  use or link to the glossary. Outside sources are optional further
+  reading, never required.
+
 ## Planning
 
 - `PLAN.md` is the live checklist for current work. Update it as tasks
