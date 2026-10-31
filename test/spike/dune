@@ -1,0 +1,19 @@
+; Random differential testing against Spike: `dune build @spike`.
+; Needs riscv64-suse-linux-gcc and a Spike build (SPIKE, default
+; ../riscv-deps/spike/bin/spike); skips otherwise.
+
+(executable
+ (name spike_diff)
+ (libraries riscv gen_instr qcheck-core unix))
+
+(rule
+ (alias spike)
+ (deps
+  spike_diff.exe
+  link.ld
+  (env_var SPIKE)
+  (env_var SPIKE_DIFF_COUNT)
+  (env_var SPIKE_DIFF_LENGTH)
+  (env_var SPIKE_DIFF_SEED))
+ (action
+  (run %{dep:spike_diff.exe})))
