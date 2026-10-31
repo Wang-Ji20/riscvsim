@@ -9,6 +9,7 @@
  (alias ocaml)
  (deps
   ocaml_guest.exe
-  (source_tree %{project_root}/guest/ocaml))
+  (source_tree %{project_root}/guest/ocaml)
+  (env_var OCAMLRUN_RISCV))
  (action
   (run %{dep:ocaml_guest.exe})))

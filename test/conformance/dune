@@ -10,6 +10,8 @@
  (deps
   conformance.exe
   (source_tree riscv-tests-env)
-  (source_tree arch-test-model))
+  (source_tree arch-test-model)
+  (env_var RISCV_TESTS)
+  (env_var RISCV_ARCH_TEST))
  (action
   (run %{dep:conformance.exe})))
