@@ -153,3 +153,10 @@ Live checklist, updated as work lands.
       about 30 s). Each step skips when its tools or suites are missing.
       Clean-code pass done: `Os` syscalls are a table of small named
       handlers, and rvlibc float formatting is split into helpers.
+
+## After Phase 0
+
+- [x] HTIF `tohost` exits (`Os.run`), so bare-metal Spike ELFs run unchanged
+- [x] Random differential testing against Spike (`dune build @spike`).
+      Found and fixed two FMA flag bugs: an underflowing product as a
+      sticky bit, and OF lost when c is below the product's ulp

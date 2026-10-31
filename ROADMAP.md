@@ -23,9 +23,10 @@ testable. A step marked ✅ is done in the user-mode simulator.
 0.4 ✅ Pass the official **riscv-tests**: 150/150 (rv64u{i,m,a,f,d,c},
     rv64uzba/zbb/zbs), using a user-mode environment instead of HTIF.
 0.5 ✅ **riscv-arch-test** 2.7.4: 265/265 signatures match the shipped
-    references (I, M, C, D, Zifencei). Spike, and ACT4's Sail-based
-    self-checking flow, remain to do as an extra oracle (they need
-    permission to build external code).
+    references (I, M, C, D, Zifencei). Spike is a second oracle: random
+    differential testing (`dune build @spike`) compares complete
+    architectural state on random programs. ACT4's Sail-based flow remains
+    to do.
 0.6 ✅ Static C programs in user mode, with the Linux initial stack
     (argc, argv, envp, auxv) and about 60 syscalls. Programs are checked
     on our own freestanding libc (`guest/libc`, the "musl-like" one) and on

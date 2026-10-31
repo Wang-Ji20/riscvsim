@@ -154,6 +154,22 @@ dune test
   and must print exactly what a native x86-64 build prints, with the same
   exit status.
 
+### Random differential testing against Spike
+
+```
+dune build @spike                                    # 200 programs, ~15 s
+SPIKE_DIFF_COUNT=5000 SPIKE_DIFF_SEED=99 dune build @spike
+```
+
+Random straight-line programs over the whole ISA, started from random
+integer and FP state (NaN-boxed and improperly boxed singles, subnormals,
+sNaNs), run on [Spike](https://github.com/riscv-software-src/riscv-isa-sim)
+and on riscvsim. The final registers and `fflags` must match. On a
+mismatch, a binary search reports the first diverging instruction and its
+inputs. This found two FMA flag bugs that every fixed suite had missed;
+both now have regression tests. Riscvsim implements HTIF `tohost`, so the
+same bare-metal ELF runs on both.
+
 ### OCaml on riscvsim
 
 ```

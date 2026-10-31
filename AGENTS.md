@@ -66,8 +66,11 @@ They record what the maintainer and the agent have agreed on.
 - Prefer differential testing against an independent oracle: clang, the
   host's libc or OCaml runtime, or reference signatures.
 - When changing the ISA, FPU or Linux emulation, also run
-  `dune build @conformance` (riscv-tests, riscv-arch-test) and
+  `dune build @conformance` (riscv-tests, riscv-arch-test),
+  `dune build @spike` (random differential testing against Spike), and
   `dune build @ocaml` (OCaml bytecode on riscvsim).
+- A mismatch found by `@spike` becomes a row in the regression tables in
+  `test/test_main.ml` before it's fixed.
 - Every bug fixed gets a regression test.
 
 ## Planning
