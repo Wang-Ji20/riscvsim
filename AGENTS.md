@@ -17,9 +17,16 @@ They record what the maintainer and the agent have agreed on.
   merges. An agent never uses it or triggers its passphrase prompt.
 - **Every commit is atomic.** It holds one logical change, builds, and
   passes `dune test` on its own.
-- **Every commit spans at most 500 lines**, counted as insertions plus
-  deletions in `git diff --cached --shortstat`. Split larger work into a
-  sequence of atomic commits. If a change truly can't be split, ask first.
+- **Keep commits small.** Size is counted as insertions plus deletions in
+  `git diff --cached --shortstat`:
+  - Aim for **at most 500 lines**, splitting larger work into a sequence
+    of atomic commits.
+  - Up to **1000 lines** is fine when the change isn't complicated.
+  - Larger is allowed when the change truly can't be split. Say why in the
+    commit message.
+  - **No limit** for formatter runs (`dune fmt`) or rule-based refactors,
+    meaning mechanical changes such as renames applied uniformly. Keep
+    them in commits of their own, separate from behaviour changes.
 - Commit messages: an imperative summary line, then a body that says why.
   End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` when
   Claude wrote the change.
