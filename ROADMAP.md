@@ -30,11 +30,12 @@ testable. A step marked ✅ is done in the user-mode simulator.
     (argc, argv, envp, auxv) and about 60 syscalls. Programs are checked
     on our own freestanding libc (`guest/libc`, the "musl-like" one) and on
     static glibc 2.44, both against a native host build.
-0.7 ⏳ Run a statically linked OCaml *bytecode* runtime (`ocamlrun`) in
-    user mode. `guest/ocamlrun/build.sh` cross-builds it without OCaml's
-    configure; it's waiting on permission to compile the downloaded OCaml
-    sources. Likely next hurdle: OCaml 5's domain backup thread needs
-    `clone(CLONE_THREAD)`, which means real guest threads.
+0.7 ✅ OCaml 5.4.1's bytecode runtime (`ocamlrun`, static riscv64) runs
+    host-compiled bytecode with output identical to the host
+    (`dune build @ocaml`). The stress program takes about 65 s, roughly
+    400M instructions, which motivates Phase 8. Multi-domain programs
+    (`Domain.spawn`) will need `clone(CLONE_THREAD)`, that is, real guest
+    threads.
 
 ## Phase 1: Architecture refactor for system mode
 

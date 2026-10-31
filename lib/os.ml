@@ -264,15 +264,23 @@ let console_stat t addr ~rdev =
   write_u64 t (Int64.add addr 32L) rdev;
   write_u32 t (Int64.add addr 56L) 1024
 
+(** Read up to [len] bytes, stopping early only at end of file. [Unix.read]
+    returns at most 64 KiB per call, while Linux returns the full count for
+    regular files, and programs (ocamlrun among them) rely on that. *)
+let read_fully h len =
+  let b = Bytes.create len in
+  let rec go off =
+    let n = if off < len then Unix.read h b off (len - off) else 0 in
+    if n > 0 then go (off + n) else off
+  in
+  Bytes.sub_string b 0 (go 0)
+
 let do_read t fd buf len =
   let data =
     match file t fd with
     | Stdin -> t.io.input len
     | Stdout | Stderr -> fail ebadf
-    | Host h ->
-        let b = Bytes.create len in
-        let n = Unix.read h b 0 len in
-        Bytes.sub_string b 0 n
+    | Host h -> read_fully h len
   in
   write_bytes t buf (Bytes.of_string data);
   String.length data
@@ -560,12 +568,7 @@ let sys_mremap t a =
 
 let read_file_into t fd ~offset ~addr ~len =
   at_offset t fd offset (fun () ->
-      let h = host t fd and b = Bytes.create len in
-      let rec fill off =
-        let n = if off < len then Unix.read h b off (len - off) else 0 in
-        if n > 0 then fill (off + n) else off
-      in
-      write_bytes t addr (Bytes.sub b 0 (fill 0)))
+      write_bytes t addr (Bytes.of_string (read_fully (host t fd) len)))
 
 let sys_mmap t a =
   let map_fixed = 0x10 and map_anonymous = 0x20 in

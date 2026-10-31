@@ -140,12 +140,13 @@ Live checklist, updated as work lands.
       the same program. Linux syscalls (mmap, munmap, mprotect,
       set_tid_address, writev, uname, getrandom, clock_gettime, newfstatat,
       ioctl, ...)
-- [ ] F. 0.7 cross-build OCaml 5.4.1 `ocamlrun` (static, riscv64) and run
-      host-compiled bytecode programs on riscvsim. **Blocked**: the build
-      script (`guest/ocamlrun/build.sh`) is written, but compiling the
-      downloaded OCaml runtime sources was refused by the permission
-      policy. It needs the user's go-ahead. The file I/O, mmap, and other
-      syscalls it needs are already implemented and tested.
+- [x] F. 0.7 OCaml 5.4.1 `ocamlrun`, cross-built by `guest/ocamlrun/build.sh`
+      (no configure needed), runs host-compiled bytecode on riscvsim. Output
+      is **identical to the host's ocamlrun** for `guest/ocaml/*.ml`: GC,
+      floats, exceptions, deep recursion, file I/O, Format, and effect
+      handlers (`dune build @ocaml`). Found and fixed on the way: Linux
+      `read` on a regular file returns the full count, but `Unix.read`
+      stops at 64 KiB.
 - [x] G. `dune test` runs the unit/property tests, the clang
       cross-check, and the three-way guest program comparison.
       `dune build @conformance` runs riscv-tests and riscv-arch-test (in

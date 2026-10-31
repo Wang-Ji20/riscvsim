@@ -1,0 +1,14 @@
+; OCaml bytecode on riscvsim (needs a cross-built ocamlrun, see
+; guest/ocamlrun/build.sh): run with `dune build @ocaml`.
+
+(executable
+ (name ocaml_guest)
+ (libraries riscv unix))
+
+(rule
+ (alias ocaml)
+ (deps
+  ocaml_guest.exe
+  (source_tree %{project_root}/guest/ocaml))
+ (action
+  (run %{dep:ocaml_guest.exe})))

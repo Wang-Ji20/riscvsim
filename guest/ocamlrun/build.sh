@@ -20,9 +20,11 @@ trap 'rm -rf "$build"' EXIT
 
 # 1. Configuration headers
 mkdir -p "$build/caml"
-for h in m.h version.h opnames.h jumptbl.h; do cp "$host_caml/$h" "$build/caml/$h"; done
+for h in m.h version.h exec.h opnames.h jumptbl.h; do cp "$host_caml/$h" "$build/caml/$h"; done
 grep -v 'HAS_ZSTD' "$host_caml/s.h" > "$build/caml/s.h"
-for h in m.h s.h version.h; do cp "$build/caml/$h" "$build/$h"; done
+# runtime/caml/*.h include these by bare name, so they must also be found
+# directly on the include path
+for h in m.h s.h version.h exec.h opnames.h jumptbl.h; do cp "$build/caml/$h" "$build/$h"; done
 cat > "$build/build_config.h" <<'H'
 #define OCAML_STDLIB_DIR "/usr/lib/ocaml"
 #define HOST "riscv64-unknown-linux-gnu"

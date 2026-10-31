@@ -154,6 +154,20 @@ dune test
   and must print exactly what a native x86-64 build prints, with the same
   exit status.
 
+### OCaml on riscvsim
+
+```
+guest/ocamlrun/build.sh ../riscv-deps/ocaml-5.4.1 /tmp/ocamlrun.rv   # once
+dune build @ocaml
+```
+
+OCaml 5.4.1's bytecode interpreter, cross-compiled for riscv64 (static
+glibc), runs on riscvsim. Each `guest/ocaml/*.ml` is compiled by the host's
+`ocamlc` and must give the same output and exit status under the host's
+`ocamlrun` and under riscvsim. The stress test covers the GC, float
+printing, exceptions, deep recursion, file I/O, `Format` and effect
+handlers.
+
 ### Conformance suites
 
 ```
