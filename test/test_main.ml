@@ -872,7 +872,13 @@ let test_machine () =
   Hart.set_pc h0 0x10000L;
   Hart.step h0;
   check_eq ~pp:Int64.to_string "hart 0 sees code rewritten after hart 1 was created" 6L
-    (Hart.get_x h0 10)
+    (Hart.get_x h0 10);
+  let m = Machine.create (Bus.user ()) in
+  load_code m.bus "ecall";
+  Hart.set_pc (Machine.hart m 0) 0x10000L;
+  check_eq ~pp:pp_outcome "without an emulated environment, ecall traps"
+    (Hart.Trapped { trap = { cause = Ecall_from_u; tval = 0L }; pc = 0x10000L })
+    (Machine.run ~fuel:10 m)
 [@@ocamlformat "disable"]
 
 let test_semantics () =

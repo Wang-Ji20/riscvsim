@@ -70,8 +70,9 @@ The parts, from the bottom up:
 - **`Hart`** (*hardware thread*, one processor core) holds the processor
   state (32 integer registers, 32 FP registers, the program counter, a
   few control registers) and executes instructions. When the program
-  executes `ecall`, the hart hands control
-  to whatever environment is attached.
+  executes `ecall`, the hart asks its *environment*: either an emulated
+  one, which handles the call in OCaml, or none, in which case `ecall`
+  traps as on real hardware.
 - **`Os`** is that environment: a Linux process. It builds the initial
   stack (arguments, environment), keeps a table of open files backed by
   real host files, manages the program's memory, and implements the
@@ -133,9 +134,10 @@ directly.
 - **Real machine code.** Programs live in memory as bits, and the CPU
   decodes them as hardware would. Self-modifying code and compressed
   instructions work for that reason.
-- **Small, swappable pieces.** The CPU doesn't know about Linux; it calls
-  a hook on `ecall`. That is what will let a future privileged-mode
-  machine (roadmap Phase 2) replace `Os` without touching the CPU.
+- **Small, swappable pieces.** The hart doesn't know about Linux. Its
+  environment is either `Emulated handler` (`Os` installs one) or
+  `Trapping`. That is what lets a system-mode machine run the guest's
+  own operating system without touching the hart.
 - **Trust, but verify against oracles.** Every important behaviour is
   checked against something independent: clang, glibc, the host OCaml
   runtime, reference signatures, or Spike. See

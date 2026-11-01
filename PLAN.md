@@ -200,5 +200,5 @@ docs/perf targets say Phases 1-5 need far less).
 - [x] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
       stores; `Device.S` and `Device.pack`
 - [x] 1d. `Machine`: harts, bus, devices, virtual clock; `mhartid`
-- [ ] 1e. Pluggable environment: Linux emulation or `ecall` as a trap
+- [x] 1e. Pluggable environment (`Hart.env`): `Emulated` or `Trapping`
 - [ ] 1f. Snapshots

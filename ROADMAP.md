@@ -50,7 +50,7 @@ testable. A step marked ✅ is done in the user-mode simulator.
     `Trap` exception, so page faults and access faults can propagate.
 1.4 ✅ Model exceptions precisely: on a trap, no architectural state changes,
     and `*epc`/`*tval` are correct.
-1.5 Replace the user-mode syscall layer with a pluggable "environment". User
+1.5 ✅ Replace the user-mode syscall layer with a pluggable "environment". User
     mode keeps the Linux-ABI emulation; system mode delivers `ecall` as a
     real trap.
 1.6 Add a checkpoint/snapshot format (registers, CSRs, RAM pages, device

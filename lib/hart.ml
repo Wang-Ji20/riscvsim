@@ -1,15 +1,25 @@
-(** A single RV64GC hart. [ecall] is delegated to a pluggable handler (see {!Os}
-    for the Linux user-mode environment). *)
+(** A single RV64GC hart. What [ecall] does depends on its {!env}: {!Os}
+    emulates Linux system calls, and a system-mode machine traps. *)
 
 open Instr
 
 (** Raise an illegal-instruction trap; [tval] holds the instruction bits. *)
 let illegal bits = Trap.raise_trap Illegal_instruction (Int64.of_int bits)
 
+(** The environment an [ecall] reaches (ROADMAP 1.5). *)
+type env =
+  | Emulated of (t -> unit)
+      (** The simulator handles the call itself, as {!Os} emulates Linux system
+          calls for a user-mode process. *)
+  | Trapping
+      (** [ecall] raises a trap, as on real hardware, for the guest's own
+          operating system or firmware to handle. Until privilege levels exist
+          (ROADMAP Phase 2) it reports an ecall from U-mode. *)
+
 (* Registers live in [Bytes] rather than an [int64 array]: an array stores
    each int64 as a separate heap block, so every register write allocated.
    [Bytes.get_int64_le]/[set_int64_le] compile to plain memory accesses. *)
-type t = {
+and t = {
   x : Bytes.t;  (** 32 little-endian int64s; [x0] is never written *)
   f : Bytes.t;  (** 32 raw bit patterns; singles are NaN-boxed *)
   pc_cell : Bytes.t;  (** the program counter, one int64; see {!pc} *)
@@ -22,7 +32,7 @@ type t = {
   mutable instret : int;  (** instructions retired; 63 bits never overflow *)
   mutable reservation : int64 option;  (** LR/SC reservation address *)
   mutable exit_code : int option;
-  mutable ecall : t -> unit;  (** environment call handler *)
+  mutable env : env;  (** what [ecall] does *)
   mcsrs : (int, int64) Hashtbl.t;
       (** machine-mode CSRs, as plain storage for now (ROADMAP phase 2) *)
 }
@@ -49,7 +59,7 @@ let create ?(hartid = 0) ?(bus = Bus.user ()) () =
     instret = 0;
     reservation = None;
     exit_code = None;
-    ecall = (fun _ -> Trap.raise_trap Ecall_from_u 0L);
+    env = Trapping;
     mcsrs = Hashtbl.create 16;
   }
 
@@ -486,7 +496,10 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Op { op; rd; rs1; rs2 } -> set t rd (alu op (get t rs1) (get t rs2))
   | Unary { op; rd; rs1 } -> set t rd (unary op (get t rs1))
   | Fence _ | Fence_i -> () (* the decode cache is always coherent *)
-  | Ecall -> t.ecall t
+  | Ecall -> (
+      match t.env with
+      | Emulated handle -> handle t
+      | Trapping -> Trap.raise_trap Ecall_from_u 0L)
   | Ebreak -> Trap.raise_trap Breakpoint pc
   | Csr { op; rd; src; csr } ->
       let v, writes =

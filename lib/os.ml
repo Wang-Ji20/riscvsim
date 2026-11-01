@@ -711,7 +711,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
       tohost = List.assoc_opt "tohost" img.symbols;
     }
   in
-  hart.ecall <- (fun _ -> syscall t);
+  hart.env <- Emulated (fun _ -> syscall t);
   t
 
 (* {1 Running} *)
