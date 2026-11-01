@@ -60,6 +60,7 @@ The parts, from the bottom up:
 - **`Bus`** connects the hart to RAM and to memory-mapped *devices*
   (`Device`). In user mode all addresses are RAM; in system mode other
   addresses fault (see [the bus](design/system-bus.md)).
+- **`Snapshot`** saves a whole machine to a string and restores it.
 - **`Decode_cache`** remembers decoded instructions per memory page, so
   each one is decoded once. A write to a cached page throws that page's
   entries away (see [instructions](design/instructions.md)).

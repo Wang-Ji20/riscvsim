@@ -50,6 +50,11 @@ let mark_code t n =
       true
   | None -> false
 
+(** Every allocated page as [(number, contents)], in address order. *)
+let pages t =
+  Hashtbl.fold (fun n p acc -> (n, p.bytes) :: acc) t.pages []
+  |> List.sort (fun (a, _) (b, _) -> compare a b)
+
 (** Drop page [n]: it reads as zero again. *)
 let unmap_page t n =
   match Hashtbl.find_opt t.pages n with
@@ -131,3 +136,11 @@ let read_cstring ?(max = 1 lsl 20) t addr =
   in
   go 0;
   Buffer.contents buf
+
+(** Drop every page. Decoded copies are invalidated as by {!unmap_page}. *)
+let clear t = List.iter (fun (n, _) -> unmap_page t n) (pages t)
+
+(** Set page [n] to a copy of [bytes] ([page_size] long). *)
+let set_page t n bytes =
+  unmap_page t n;
+  Hashtbl.replace t.pages n { bytes = Bytes.copy bytes; code = false }

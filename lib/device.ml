@@ -22,6 +22,12 @@ module type S = sig
 
   val tick : t -> now:int -> unit
   (** Advance the device to virtual time [now] (in instructions). *)
+
+  val save : t -> string
+  (** The device's state, for a {!Snapshot}. *)
+
+  val restore : t -> string -> unit
+  (** Restore what {!save} produced. *)
 end
 
 type t = {
@@ -30,6 +36,8 @@ type t = {
   read : offset:int64 -> size:int -> int64;
   write : offset:int64 -> size:int -> int64 -> unit;
   tick : now:int -> unit;
+  save : unit -> string;
+  restore : string -> unit;
 }
 
 let pack (type s) (module D : S with type t = s) (state : s) =
@@ -39,4 +47,6 @@ let pack (type s) (module D : S with type t = s) (state : s) =
     read = D.read state;
     write = D.write state;
     tick = D.tick state;
+    save = (fun () -> D.save state);
+    restore = D.restore state;
   }

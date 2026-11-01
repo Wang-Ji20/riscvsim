@@ -14,7 +14,7 @@ testable. A step marked ✅ is done in the user-mode simulator.
 
 ---
 
-## Phase 0: User-mode foundation (current work)
+## Phase 0: User-mode foundation ✅
 
 0.1 ✅ RV64I/M/A/F/D/C/Zicsr/Zifencei/Zba/Zbb/Zbs decode, encode, execute
 0.2 ✅ Assembler, ELF writer/loader, Linux-ABI syscall emulation
@@ -38,7 +38,7 @@ testable. A step marked ✅ is done in the user-mode simulator.
     (`Domain.spawn`) will need `clone(CLONE_THREAD)`, that is, real guest
     threads.
 
-## Phase 1: Architecture refactor for system mode
+## Phase 1: Architecture refactor for system mode ✅
 
 1.1 ✅ Split `Cpu` into `Hart` (architectural state) and `Machine` (harts, bus,
     devices, clock).
@@ -53,7 +53,7 @@ testable. A step marked ✅ is done in the user-mode simulator.
 1.5 ✅ Replace the user-mode syscall layer with a pluggable "environment". User
     mode keeps the Linux-ABI emulation; system mode delivers `ecall` as a
     real trap.
-1.6 Add a checkpoint/snapshot format (registers, CSRs, RAM pages, device
+1.6 ✅ Add a checkpoint/snapshot format (registers, CSRs, RAM pages, device
     state) for fast iteration on long boots.
 
 ## Phase 2: Privileged ISA (M, S, U modes)

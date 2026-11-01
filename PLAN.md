@@ -201,4 +201,8 @@ docs/perf targets say Phases 1-5 need far less).
       stores; `Device.S` and `Device.pack`
 - [x] 1d. `Machine`: harts, bus, devices, virtual clock; `mhartid`
 - [x] 1e. Pluggable environment (`Hart.env`): `Emulated` or `Trapping`
-- [ ] 1f. Snapshots
+- [x] 1f. Snapshots (`Snapshot.save`/`restore`, versioned binary format,
+      device state through `Device.S`). A command-line option waits for
+      the system-mode `run` command (Phases 4-5).
+
+Phase 1 is complete. Next: Phase 2, privileged ISA (M/S/U modes).

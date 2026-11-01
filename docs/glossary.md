@@ -135,6 +135,10 @@ instructions that make programs about a quarter smaller.
 its results. Comparing it with a reference signature shows whether the
 implementation is correct.
 
+**Snapshot.** The complete state of a simulated machine (registers,
+memory, devices) saved at one moment, so a later run can continue from
+there instead of starting over.
+
 **Spike.** The official RISC-V reference simulator, used as an oracle.
 
 **Subnormal number.** A floating-point number so close to zero that it

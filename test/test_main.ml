@@ -419,6 +419,35 @@ let prop_precise_traps =
       | exception Trap.Trap _ -> arch_state hart = before)
   [@@ocamlformat "disable"]
 
+(* Interrupting a run with a snapshot and resuming it in a fresh process
+   ends in exactly the state of an uninterrupted run. *)
+let prop_snapshot_resume =
+  let examples =
+    lazy
+      (Sys.readdir "../examples" |> Array.to_list
+      |> List.filter (fun f -> Filename.check_suffix f ".s")
+      |> List.sort compare
+      |> List.map (fun f ->
+             (f, assemble (In_channel.with_open_bin ("../examples/" ^ f) In_channel.input_all))))
+  in
+  let boot img = Os.boot ~io:(Os.buffer_io (Buffer.create 64)) img in
+  T.make ~name:"snapshot, restore and resume = uninterrupted run" ~count:100
+    ~print:(fun (n, k) -> Printf.sprintf "example %d, snapshot after %d" n k)
+    (G.pair (G.int_bound 9) (G.int_bound 3000))
+    (fun (n, k) ->
+      let _, img = List.nth (Lazy.force examples) n in
+      let whole = boot img in
+      ignore (Os.run whole);
+      let first = boot img in
+      ignore (Os.run ~fuel:k first);
+      let snap = Snapshot.save first.machine in
+      let second = boot img in
+      Snapshot.restore second.machine snap = Ok ()
+      && Snapshot.save second.machine = snap
+      && (ignore (Os.run second);
+          Snapshot.save second.machine = Snapshot.save whole.machine))
+  [@@ocamlformat "disable"]
+
 let prop_fma_exact =
   let operand bits lo hi =
     G.pair (G.int_range (-(1 lsl bits)) (1 lsl bits)) (G.int_range lo hi)
@@ -583,7 +612,7 @@ let prop_profile =
          = List.map (fun (_, e) -> e.Stats.count) hot)
 
 let properties =
-  [ prop_profile; prop_fpu_fast_paths; prop_precise_traps; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
+  [ prop_profile; prop_fpu_fast_paths; prop_precise_traps; prop_snapshot_resume; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
     prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 
@@ -755,6 +784,8 @@ module Scratch_device = struct
       Bytes.set_uint8 t (Int64.to_int offset + i) (Int64.to_int (Int64.shift_right_logical v (8 * i)) land 0xff)
     done
   let tick _ ~now:_ = ()
+  let save = Bytes.to_string
+  let restore t s = Bytes.blit_string s 0 t 0 64
 end
 [@@ocamlformat "disable"]
 
@@ -832,6 +863,9 @@ module Tick_log = struct
   let read _ ~offset:_ ~size:_ = 0L
   let write _ ~offset:_ ~size:_ _ = ()
   let tick t ~now = t := now :: !t
+  let save t = String.concat "," (List.map string_of_int !t)
+  let restore t s =
+    t := if s = "" then [] else List.map int_of_string (String.split_on_char ',' s)
 end
 
 let test_machine () =
@@ -873,6 +907,21 @@ let test_machine () =
   Hart.step h0;
   check_eq ~pp:Int64.to_string "hart 0 sees code rewritten after hart 1 was created" 6L
     (Hart.get_x h0 10);
+  let bus = Bus.system ~ram_base:0x8000_0000L ~ram_size:0x1000L in
+  let state = Bytes.make 64 '\000' in
+  Bus.attach bus ~base:0x1000_0000L (Device.pack (module Scratch_device) state);
+  let m = Machine.create bus in
+  Bytes.set_int64_le state 8 0xabcdL;
+  let snap = Snapshot.save m in
+  Bytes.fill state 0 64 '\000';
+  check "snapshots restore device state"
+    (Snapshot.restore m snap = Ok () && Bytes.get_int64_le state 8 = 0xabcdL);
+  check "a corrupt snapshot is rejected"
+    (Result.is_error (Snapshot.restore m ("X" ^ String.sub snap 1 (String.length snap - 1))));
+  check "a truncated snapshot is rejected"
+    (Result.is_error (Snapshot.restore m (String.sub snap 0 (String.length snap - 3))));
+  check "a snapshot from a different machine is rejected"
+    (Result.is_error (Snapshot.restore (Machine.create ~harts:2 (Bus.user ())) snap));
   let m = Machine.create (Bus.user ()) in
   load_code m.bus "ecall";
   Hart.set_pc (Machine.hart m 0) 0x10000L;

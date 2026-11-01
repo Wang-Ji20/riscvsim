@@ -1,8 +1,8 @@
-# Design: the machine, bus, devices and traps
+# Design: the machine, bus, devices, traps and snapshots
 
 This document covers the parts that prepare riscvsim to simulate a whole
 computer rather than one Linux process (roadmap Phase 1). Modules:
-`Machine`, `Trap`, `Bus`, `Device`.
+`Machine`, `Trap`, `Bus`, `Device`, `Snapshot`.
 
 ## User mode and system mode
 
@@ -121,6 +121,8 @@ address, so a device doesn't need to know where it was placed.
 
 `tick` lets a device do work over time, for example a timer raising an
 interrupt. Time is counted in instructions, so a run is deterministic.
+`save` and `restore` turn the device's state into a string and back, for
+snapshots.
 
 ## Traps
 
@@ -154,3 +156,36 @@ One subtle case: a 4-byte instruction can start 2 bytes before the end
 of RAM. Its second half is outside RAM, so the fault is reported at that
 address (`pc + 2`), not at the instruction's start, as the RISC-V
 specification requires.
+
+## Snapshots
+
+Booting Linux takes hundreds of millions of instructions. When debugging
+something that happens late in the boot, rerunning from the start every
+time is slow. A *snapshot* saves the whole machine at one moment, so a
+later run can start from there.
+
+`Snapshot.save machine` returns a string; `Snapshot.restore machine s`
+loads it into a machine with the same harts and devices. It contains:
+
+```
+"RVSNAP" 0x00 version
+virtual clock
+per hart:   id, pc, counters, FP state, reservation, x0-x31, f0-f31, CSRs
+per page:   page number, 4096 bytes          (only pages that exist)
+per device: name, its own saved state
+```
+
+All numbers are 64-bit little-endian, so a snapshot doesn't depend on
+the host. The version byte lets the format change later without
+misreading old files: an unknown version, a different machine, or a
+truncated file is rejected with an error, not half-loaded silently.
+
+Not saved: the decode caches (they refill on their own) and the hart's
+environment. An emulated environment such as `Os` holds host state, open
+files for example, that can't be saved. So snapshots are meant for
+system-mode machines, where everything lives inside the machine.
+
+**Tested by** interrupting runs of the example programs at random points,
+restoring the snapshot into a freshly booted machine and finishing the
+run there: the final state must be byte-for-byte the state of an
+uninterrupted run. Restoring must also reproduce the snapshot exactly.
