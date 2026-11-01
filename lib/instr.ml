@@ -219,12 +219,6 @@ let fma_ops = [ (Fmadd, "fmadd"); (Fmsub, "fmsub"); (Fnmsub, "fnmsub");
 let fcmp_ops = [ (Feq, "feq"); (Flt, "flt"); (Fle, "fle") ]
 let int_tys = [ (I32, "w"); (U32, "wu"); (I64, "l"); (U64, "lu") ]
 
-(** Well-known CSR numbers. *)
-let csr_names =
-  [ (0x001, "fflags"); (0x002, "frm"); (0x003, "fcsr"); (0xc00, "cycle");
-    (0xc01, "time"); (0xc02, "instret") ]
-[@@ocamlformat "disable"]
-
 let name table op = List.assoc op table
 
 (** Conversions that are always exact. Assemblers encode them with [rne]
@@ -249,7 +243,7 @@ let pp ppf =
   let fm = name fmts in
   let pp_rm i ppf rm = if rm <> default_rm i then fprintf ppf ", %s" (name rms rm) in
   let pp_csr ppf csr =
-    match List.assoc_opt csr csr_names with
+    match Csr.name csr with
     | Some n -> pp_print_string ppf n
     | None -> fprintf ppf "0x%x" csr
   in

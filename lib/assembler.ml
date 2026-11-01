@@ -381,8 +381,8 @@ let () =
     | _ -> error "fence expects no operands or pred, succ");
   (* Zicsr *)
   let csr_num = function
-    | P.Expr (P.Sym s) when List.exists (fun (_, n) -> n = s) csr_names ->
-        `Known (fst (List.find (fun (_, n) -> n = s) csr_names))
+    | P.Expr (P.Sym s) when Csr.of_name s <> None ->
+        `Known (Option.get (Csr.of_name s))
     | P.Expr e -> `Expr e
     | _ -> error "expected a CSR"
   in

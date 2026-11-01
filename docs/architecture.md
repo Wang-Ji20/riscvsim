@@ -64,6 +64,8 @@ The parts, from the bottom up:
 - **`Decode_cache`** remembers decoded instructions per memory page, so
   each one is decoded once. A write to a cached page throws that page's
   entries away (see [instructions](design/instructions.md)).
+- **`Priv`**, **`Csr`** and **`Csr_file`** model privilege levels and
+  the control registers (see [privileged](design/privileged.md)).
 - **`Trap`** lists the RISC-V *traps* (see the glossary) with their
   cause codes. The CPU raises them as an OCaml exception.
 - **`Fpu`** computes floating-point results exactly as the IEEE 754

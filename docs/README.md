@@ -24,6 +24,7 @@ OCaml or emulators. When a word is unfamiliar, look it up in the
    - [The assembler](design/assembler.md)
    - [Running Linux programs](design/linux-emulation.md)
    - [The bus, devices and traps](design/system-bus.md)
+   - [Privilege levels and control registers](design/privileged.md)
    - [rvlibc, our C library](design/rvlibc.md)
    - [Testing strategy](design/testing.md)
 4. **[Performance](perf/README.md)**: goals, how we measure, and the plan

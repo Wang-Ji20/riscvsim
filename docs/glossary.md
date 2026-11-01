@@ -113,6 +113,10 @@ state a rule that must always hold (for example "decoding an encoded
 instruction gives back the original") and the test library checks it on
 thousands of random inputs. riscvsim uses the QCheck library.
 
+**Privilege level.** How much a running program is allowed to do. RISC-V
+has three: machine (M, firmware), supervisor (S, the operating system
+kernel) and user (U, ordinary programs).
+
 **Pseudo-instruction.** An assembly-language convenience that the
 assembler expands into one or more real instructions. `li a0, 5` (load
 immediate) is one.
@@ -159,6 +163,10 @@ access, `ebreak`, `ecall`, and later page faults. Each kind has a number,
 the *cause*, and a value, *tval*, that says more (the bad address, or the
 bits of the illegal instruction). A trapping instruction changes nothing:
 registers, memory and the program counter are as they were before it.
+
+**WARL (write any, read legal).** A rule for control registers: any
+value may be written, but reading gives back only legal values. Bits
+that don't exist read as zero.
 
 **User mode.** The restricted mode ordinary programs run in. riscvsim
 currently simulates only user mode and handles the operating system's

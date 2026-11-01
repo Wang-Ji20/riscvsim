@@ -687,6 +687,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     (img : Image.t) =
   let machine = Machine.create (Bus.user ()) in
   let hart = Machine.hart machine 0 in
+  Csr_file.set_fs hart.csrs 1 (* Linux starts processes with FS = Initial *);
   Hart.load hart img;
   setup_stack hart img ~argv ~env;
   let brk = page_align (Image.end_address img) in

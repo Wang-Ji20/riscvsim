@@ -32,8 +32,7 @@ and t = {
   mutable instret : int;  (** instructions retired; 63 bits never overflow *)
   mutable exit_code : int option;
   mutable env : env;  (** what [ecall] does *)
-  mcsrs : (int, int64) Hashtbl.t;
-      (** machine-mode CSRs, as plain storage for now (ROADMAP phase 2) *)
+  csrs : Csr_file.t;  (** privilege level and privileged CSRs *)
 }
 
 (** A hart on [bus] (by default a user-mode bus: RAM everywhere). *)
@@ -58,7 +57,7 @@ let create ?(hartid = 0) ?(bus = Bus.user ()) () =
     instret = 0;
     exit_code = None;
     env = Trapping;
-    mcsrs = Hashtbl.create 16;
+    csrs = Csr_file.create ~hartid;
   }
 
 let pc t = Bytes.get_int64_le t.pc_cell 0
@@ -89,7 +88,12 @@ let set_f t n v = Bytes.set_int64_le t.f (8 * n) v
 let get t (r : Reg.t) = get_x t (r :> int)
 let set t (r : Reg.t) v = set_x t (r :> int) v
 let getf t (r : Freg.t) = get_f t (r :> int)
-let setf t (r : Freg.t) v = set_f t (r :> int) v
+
+(** Write an FP register from an instruction: FP state becomes dirty. *)
+let setf t (r : Freg.t) v =
+  Csr_file.set_fp_dirty t.csrs;
+  set_f t (r :> int) v
+
 let get_s t r = Fpu.unbox_s (getf t r)
 let set_s t r v = setf t r (Fpu.box_s v)
 
@@ -323,33 +327,39 @@ let store_size = function Sb -> 1 | Sh -> 2 | Sw -> 4 | Sd -> 8
 (* {1 CSRs} *)
 
 (* An unimplemented CSR is an illegal instruction, as on hardware. *)
+(* The FP CSRs and the counters are hart state; everything else privileged
+   lives in [Csr_file]. Counters: cycle = time = instret (no timing model;
+   real time comes with the timer device, ROADMAP 4.1). *)
+
 let csr_read t ~bits csr =
   match csr with
   | 0x001 -> Int64.of_int t.fflags
   | 0x002 -> Int64.of_int t.frm
   | 0x003 -> Int64.of_int ((t.frm lsl 5) lor t.fflags)
-  | 0xc00 | 0xc01 | 0xc02 -> Int64.of_int t.instret (* cycle = time *)
-  | 0x301 (* misa: RV64 IMAFDC + U *) ->
-      Int64.(logor (shift_left 2L 62) (of_int 0x10112d))
-  | 0xf11 | 0xf12 | 0xf13 (* vendor, architecture, implementation ids *) -> 0L
-  | 0xf14 -> Int64.of_int t.hartid
-  | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
-      Option.value ~default:0L (Hashtbl.find_opt t.mcsrs csr)
-  | _ -> illegal bits
+  | 0xc00 | 0xc01 | 0xc02 | 0xb00 | 0xb02 -> Int64.of_int t.instret
+  | _ -> (
+      match Csr_file.read t.csrs csr with Some v -> v | None -> illegal bits)
 
 let csr_write t ~bits csr v64 =
   let v = Int64.to_int v64 in
+  let fp_csr f =
+    f ();
+    Csr_file.set_fp_dirty t.csrs
+  in
   match csr with
-  | 0x001 -> t.fflags <- v land 0x1f
-  | 0x002 -> t.frm <- v land 0x7
+  | 0x001 -> fp_csr (fun () -> t.fflags <- v land 0x1f)
+  | 0x002 -> fp_csr (fun () -> t.frm <- v land 0x7)
   | 0x003 ->
-      t.fflags <- v land 0x1f;
-      t.frm <- (v lsr 5) land 0x7
-  | 0x301 -> () (* misa is WARL; writes ignored *)
-  | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
-      Hashtbl.replace t.mcsrs csr v64
-  | _ -> illegal bits
-(* counters are read-only *)
+      fp_csr (fun () ->
+          t.fflags <- v land 0x1f;
+          t.frm <- (v lsr 5) land 0x7)
+  | 0xb00 | 0xb02 ->
+      (* the written value is what the next instruction reads, so undo the
+         increment this instruction is about to make *)
+      t.instret <- v - 1
+  | _ ->
+      if Csr_file.read t.csrs csr = None then illegal bits
+      else Csr_file.write t.csrs csr v64
 
 (* {1 Floating point} *)
 
@@ -366,7 +376,9 @@ let fp_exec t ~bits (i : Instr.t) =
     match rm_of t rm with Some rm -> rm | None -> illegal bits
   in
   let flag (v, fl) =
-    t.fflags <- t.fflags lor fl;
+    if fl <> 0 then (
+      t.fflags <- t.fflags lor fl;
+      Csr_file.set_fp_dirty t.csrs);
     v
   in
   let rd_d r = getf t r and rd_s r = get_s t r in
@@ -506,6 +518,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
         | Rs1 r -> (get t r, (r :> int) <> 0 || op = Csrrw)
         | Uimm u -> (Int64.of_int u, u <> 0 || op = Csrrw)
       in
+      if not (Csr_file.check t.csrs csr ~write:writes) then illegal bits;
       (* csrrw with rd = zero must not read (no read side effects) *)
       let old =
         if op = Csrrw && (rd :> int) = 0 then 0L else csr_read t ~bits csr
@@ -520,6 +533,11 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
          csr_write t ~bits csr nv);
       set t rd old
   | Amo { op; width; rd; rs1; rs2; _ } -> amo t ~op ~width ~rd ~rs1 ~rs2
+  | Fload _ | Fstore _ | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _
+  | Fclass _ | Fcvt_to_int _ | Fcvt_of_int _ | Fcvt_fmt _ | Fmv_to_int _
+  | Fmv_of_int _
+    when not (Csr_file.fp_enabled t.csrs) ->
+      illegal bits (* mstatus.FS = Off *)
   | Fload { fmt = D; rd; rs1; offset } ->
       setf t rd (Bus.load t.bus (address t rs1 offset) 8)
   | Fload { fmt = S; rd; rs1; offset } ->

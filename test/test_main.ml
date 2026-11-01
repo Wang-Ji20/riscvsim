@@ -387,7 +387,7 @@ let arch_state (hart : Hart.t) =
   let zero_page = Bytes.make Memory.page_size '\000' in
   ( (Bytes.copy hart.x, Bytes.copy hart.f, Hart.pc hart, hart.instret),
     (hart.fflags, hart.frm, Bus.reservation hart.bus ~hartid:0),
-    sorted hart.mcsrs (fun k v -> [ (k, v) ]),
+    Csr_file.to_list hart.csrs,
     sorted hart.mem.pages (fun n (p : Memory.page) ->
         if Bytes.equal p.bytes zero_page then [] else [ (n, Bytes.copy p.bytes) ]) )
 
@@ -400,17 +400,19 @@ let prop_precise_traps =
     and+ regs = G.array_size (G.return 32) reg_value
     and+ fregs = G.array_size (G.return 32) double_bits
     and+ frm = G.int_range 0 7
+    and+ fs = G.int_range 0 3
     and+ reserved = G.bool in
-    (i, regs, fregs, frm, reserved)
+    (i, regs, fregs, (frm, fs), reserved)
   in
   T.make ~name:"a trapping instruction changes no architectural state" ~count:5000
-    ~print:(fun (i, _, _, frm, _) -> Printf.sprintf "%s (frm=%d)" (Instr.to_string i) frm)
-    gen (fun (i, regs, fregs, frm, reserved) ->
+    ~print:(fun (i, _, _, (frm, fs), _) -> Printf.sprintf "%s (frm=%d, fs=%d)" (Instr.to_string i) frm fs)
+    gen (fun (i, regs, fregs, (frm, fs), reserved) ->
       let hart = Hart.create () in
       Array.iteri (Hart.set_x hart) regs;
       Array.iteri (Hart.set_f hart) fregs;
       Hart.set_pc hart 0x10000L;
       hart.frm <- frm;
+      Csr_file.set_fs hart.csrs fs;
       if reserved then Bus.reserve hart.bus ~hartid:0 (Hart.get_x hart 10);
       Memory.store hart.mem 0x20000L 8 0x1122334455667788L;
       let before = arch_state hart in
@@ -446,6 +448,26 @@ let prop_snapshot_resume =
       && Snapshot.save second.machine = snap
       && (ignore (Os.run second);
           Snapshot.save second.machine = Snapshot.save whole.machine))
+  [@@ocamlformat "disable"]
+
+(* WARL: whatever is written, reading gives a legal value, and writing that
+   value back changes nothing. *)
+let prop_csr_warl =
+  let implemented =
+    List.filter_map
+      (fun (n, _) -> if Csr_file.read (Csr_file.create ~hartid:0) n <> None then Some n else None)
+      Csr.table
+  in
+  T.make ~name:"CSR writes are legalised idempotently" ~count:3000
+    ~print:(fun (n, v, w) -> Printf.sprintf "csr 0x%x <- 0x%Lx, then 0x%Lx" n v w)
+    G.(triple (oneof_list implemented) int64_interesting int64_interesting)
+    (fun (n, v, w) ->
+      let t = Csr_file.create ~hartid:0 in
+      Csr_file.write t (if n = Csr.mstatus then Csr.mideleg else Csr.mstatus) w;
+      Csr_file.write t n v;
+      let once = Csr_file.read t n in
+      Option.iter (Csr_file.write t n) once;
+      Csr_file.read t n = once)
   [@@ocamlformat "disable"]
 
 let prop_fma_exact =
@@ -612,7 +634,7 @@ let prop_profile =
          = List.map (fun (_, e) -> e.Stats.count) hot)
 
 let properties =
-  [ prop_profile; prop_fpu_fast_paths; prop_precise_traps; prop_snapshot_resume; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
+  [ prop_profile; prop_csr_warl; prop_fpu_fast_paths; prop_precise_traps; prop_snapshot_resume; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
     prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 
@@ -962,6 +984,51 @@ let test_machine () =
     (Machine.run ~fuel:10 m)
 [@@ocamlformat "disable"]
 
+let test_csr_file () =
+  section "privileged CSRs";
+  let module C = Csr_file in
+  let t = C.create ~hartid:0 in
+  check "reset: M-mode, FPU off, 64-bit U and S"
+    (t.C.priv = M && C.fs t = 0 && C.read t Csr.mstatus = Some C.xl_fields);
+  C.write t Csr.mstatus (Int64.shift_left 2L 11);
+  check "MPP = 2 (reserved) reads as U" (Int64.logand t.mstatus C.mpp_field = 0L);
+  C.write t Csr.mstatus C.fs_field;
+  check "SD is set exactly when FS is Dirty" (Int64.logand t.mstatus C.sd_bit <> 0L);
+  C.write t Csr.sstatus 0L;
+  check "sstatus is a view of mstatus" (C.fs t = 0 && Int64.logand t.mstatus C.sd_bit = 0L);
+  C.write t Csr.mideleg C.ssip;
+  C.write t Csr.mie (-1L);
+  check "sie shows only delegated interrupts" (C.read t Csr.sie = Some C.ssip);
+  C.write t Csr.satp (Int64.shift_left 8L 60);
+  check "satp ignores unsupported modes (Sv39 comes in Phase 3)" (t.satp = 0L);
+  let allowed priv n ~write = t.priv <- priv; C.check t n ~write in
+  check "U-mode can't touch mstatus" (not (allowed U Csr.mstatus ~write:false));
+  check "S-mode reads sstatus" (allowed S Csr.sstatus ~write:true);
+  check "S-mode can't read mstatus" (not (allowed S Csr.mstatus ~write:false));
+  check "writing a read-only CSR is illegal even in M" (not (allowed M Csr.mhartid ~write:true));
+  check "fcsr needs the FPU on" (not (allowed M Csr.fcsr ~write:false));
+  check "U-mode counters need mcounteren and scounteren"
+    (not (allowed U Csr.cycle ~write:false));
+  t.mcounteren <- 1L;
+  check "... mcounteren alone is enough for S" (allowed S Csr.cycle ~write:false);
+  check "... but not for U" (not (allowed U Csr.cycle ~write:false));
+  t.scounteren <- 1L;
+  check "... both enable U" (allowed U Csr.cycle ~write:false);
+  t.mstatus <- Int64.logor t.mstatus C.tvm_bit;
+  check "TVM forbids satp in S-mode" (not (allowed S Csr.satp ~write:false));
+  let _, _, hart = run_source "li t0, 100\ncsrw minstret, t0\ncsrr a0, minstret\nebreak" in
+  check_eq ~pp:Int64.to_string "the next instruction reads the minstret just written" 100L
+    (Hart.get_x hart 10);
+  let _, _, hart = run_source "fadd.d ft0, ft0, ft0\nebreak" in
+  check "an FP write makes FS Dirty" (Csr_file.fs hart.csrs = 3);
+  let hart = Hart.create () in
+  Memory.store hart.mem 0x10000L 4 (Int64.of_int (encode_exn (Fmv_of_int { fmt = D; rd = Freg.of_int 0; rs1 = Reg.zero })));
+  Hart.set_pc hart 0x10000L;
+  check_eq ~pp:pp_outcome "an FP instruction with the FPU off is illegal"
+    (Hart.Trapped { trap = { cause = Illegal_instruction; tval = 0xf2000053L }; pc = 0x10000L })
+    (Hart.run ~fuel:1 hart)
+[@@ocamlformat "disable"]
+
 let test_semantics () =
   section "semantics";
   let regs_after src =
@@ -1108,6 +1175,7 @@ let () =
   test_decode_cache ();
   test_bus ();
   test_machine ();
+  test_csr_file ();
   test_examples ();
   section "properties (QCheck2)";
   let qcheck_failures =

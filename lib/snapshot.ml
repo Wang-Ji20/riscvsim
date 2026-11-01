@@ -13,13 +13,14 @@
       "RVSNAP" 0x00 version(1 byte)
       now, hart count, then per hart:
         hartid pc instret fflags frm exit_code(-1: none) reservation(-1: none)
-        x0..x31 f0..f31   csr count, then (csr, value) pairs
+        x0..x31 f0..f31   csr count, then (csr, value) pairs, where the
+        privilege level is the pseudo-CSR -1
       page count, then per page: page number, 4096 bytes
       device count, then per device: name, state   (strings: length + bytes)
     v} *)
 
 let magic = "RVSNAP\000"
-let version = 1
+let version = 2
 
 (* {1 Writing} *)
 
@@ -40,7 +41,7 @@ let save_hart b (h : Hart.t) =
   add_option b (Bus.reservation h.bus ~hartid:h.hartid);
   Buffer.add_bytes b h.x;
   Buffer.add_bytes b h.f;
-  let csrs = List.sort compare (List.of_seq (Hashtbl.to_seq h.mcsrs)) in
+  let csrs = Csr_file.to_list h.csrs in
   add_int b (List.length csrs);
   List.iter
     (fun (csr, v) ->
@@ -99,11 +100,10 @@ let restore_hart r (h : Hart.t) =
   Bus.set_reservation h.bus ~hartid:h.hartid (option r);
   Bytes.blit_string (take r 256) 0 h.x 0 256;
   Bytes.blit_string (take r 256) 0 h.f 0 256;
-  Hashtbl.reset h.mcsrs;
-  for _ = 1 to int r do
-    let csr = int r in
-    Hashtbl.replace h.mcsrs csr (i64 r)
-  done
+  Csr_file.restore h.csrs
+    (List.init (int r) (fun _ ->
+         let csr = int r in
+         (csr, i64 r)))
 
 let restore_ram r ram =
   Memory.clear ram;

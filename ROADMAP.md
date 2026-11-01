@@ -60,20 +60,20 @@ testable. A step marked ✅ is done in the user-mode simulator.
 
 2.1 Privilege levels and `mstatus`/`sstatus` (MIE, SIE, MPIE, SPIE, MPP, SPP,
     SUM, MXR, FS, XS, SD, UXL/SXL).
-2.2 Machine CSRs: `misa`, `mvendorid`, `marchid`, `mimpid`, `mhartid`,
+2.2 ✅ Machine CSRs: `misa`, `mvendorid`, `marchid`, `mimpid`, `mhartid`,
     `mtvec`, `mepc`, `mcause`, `mtval`, `mscratch`, `mie`, `mip`, `medeleg`,
     `mideleg`, `mcounteren`, `menvcfg`, `mconfigptr`.
-2.3 Supervisor CSRs: `stvec`, `sepc`, `scause`, `stval`, `sscratch`, `sie`,
+2.3 ✅ Supervisor CSRs: `stvec`, `sepc`, `scause`, `stval`, `sscratch`, `sie`,
     `sip`, `satp`, `scounteren`, `senvcfg`.
 2.4 Trap entry: vectored and direct `mtvec`/`stvec`, delegation through
     `medeleg`/`mideleg`, and interrupt priority ordering.
 2.5 `mret`, `sret`, `wfi`, and `sfence.vma`. Raise illegal-instruction for
     privileged ops in the wrong mode, and enforce CSR access permissions
     (read-only, privilege level).
-2.6 FP state tracking: `mstatus.FS` off/initial/clean/dirty. An FP
+2.6 ✅ FP state tracking: `mstatus.FS` off/initial/clean/dirty. An FP
     instruction with FS=off must trap, because Linux relies on this for
     lazy FP context switching.
-2.7 Counters: `cycle`, `time`, `instret`, plus `mcounteren` gating.
+2.7 ✅ Counters: `cycle`, `time`, `instret`, plus `mcounteren` gating.
 2.8 PMP: `pmpcfg0..15`, `pmpaddr0..63`. Implement at least TOR/NAPOT,
     because OpenSBI programs them.
 2.9 Pass `rv64mi-p-*` and `rv64si-p-*` from riscv-tests.

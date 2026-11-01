@@ -210,3 +210,12 @@ Phase 1 is complete.
 # Phase 2: privileged ISA (ROADMAP 2.1-2.9)
 
 - [x] 2a. LR/SC reservations in the bus: another hart's store cancels them
+- [x] 2b. CSR file: one name table (`Csr`), M/S CSRs with WARL rules,
+      access checks, mstatus.FS (Off traps, writes make it Dirty),
+      counter enables; harts reset to M-mode
+- [ ] 2c. `mret`, `sret`, `wfi`, `sfence.vma`
+- [ ] 2d. Trap delivery (`System` environment), delegation, wrong-mode checks
+- [ ] 2e. Conformance in system mode: stock `p` env, rv64mi/si, arch-test in M-mode
+- [ ] 2f. `Os` processes run in U-mode
+- [ ] 2g. Interrupts
+- [ ] 2h. PMP
