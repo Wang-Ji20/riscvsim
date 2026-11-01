@@ -42,13 +42,13 @@ testable. A step marked ✅ is done in the user-mode simulator.
 
 1.1 Split `Cpu` into `Hart` (architectural state) and `Machine` (harts, bus,
     devices, clock).
-1.2 Introduce a `Bus` interface with `load/store : addr -> size -> ...`, and
+1.2 ✅ Introduce a `Bus` interface with `load/store : addr -> size -> ...`, and
     route RAM and MMIO through it with a region table, so devices are
     first-class modules:
     `module type DEVICE = sig val read : ... val write : ... val tick : ... end`
-1.3 Make memory access return `(value, exception) result`, or raise a typed
+1.3 ✅ Make memory access return `(value, exception) result`, or raise a typed
     `Trap` exception, so page faults and access faults can propagate.
-1.4 Model exceptions precisely: on a trap, no architectural state changes,
+1.4 ✅ Model exceptions precisely: on a trap, no architectural state changes,
     and `*epc`/`*tval` are correct.
 1.5 Replace the user-mode syscall layer with a pluggable "environment". User
     mode keeps the Linux-ABI emulation; system mode delivers `ecall` as a

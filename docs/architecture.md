@@ -38,7 +38,12 @@ program's requests (system calls).
        +--------------------------------------------------------------+
        |  Hart: fetch -> decode -> execute, registers, CSRs, atomics  |
        |                                                              |
-       |   Decode / Compressed    Fpu (IEEE 754)      Memory (pages)  |
+       |   Decode / Compressed    Fpu (IEEE 754)    Decode_cache      |
+       +--------------------------------------------------------------+
+                                         |
+                                         v
+       +--------------------------------------------------------------+
+       |  Bus: RAM (Memory, sparse pages) and devices (Device)        |
        +--------------------------------------------------------------+
 ```
 
@@ -50,6 +55,9 @@ The parts, from the bottom up:
   to and from bits: 32-bit instructions, and the 16-bit compressed ones.
 - **`Memory`** is the simulated memory: a sparse 64-bit address space,
   allocated in 4 KiB pages on first write.
+- **`Bus`** connects the hart to RAM and to memory-mapped *devices*
+  (`Device`). In user mode all addresses are RAM; in system mode other
+  addresses fault (see [the bus](design/system-bus.md)).
 - **`Decode_cache`** remembers decoded instructions per memory page, so
   each one is decoded once. A write to a cached page throws that page's
   entries away (see [instructions](design/instructions.md)).

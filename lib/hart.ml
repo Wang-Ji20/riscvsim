@@ -13,7 +13,8 @@ type t = {
   x : Bytes.t;  (** 32 little-endian int64s; [x0] is never written *)
   f : Bytes.t;  (** 32 raw bit patterns; singles are NaN-boxed *)
   pc_cell : Bytes.t;  (** the program counter, one int64; see {!pc} *)
-  mem : Memory.t;
+  bus : Bus.t;
+  mem : Memory.t;  (** the bus's RAM, which code is fetched from *)
   decoded : Decode_cache.t;
   mutable fflags : int;
   mutable frm : int;
@@ -25,13 +26,15 @@ type t = {
       (** machine-mode CSRs, as plain storage for now (ROADMAP phase 2) *)
 }
 
-let create () =
-  let mem = Memory.create () and decoded = Decode_cache.create () in
+(** A hart on [bus] (by default a user-mode bus: RAM everywhere). *)
+let create ?(bus = Bus.user ()) () =
+  let mem = Bus.ram bus and decoded = Decode_cache.create () in
   mem.on_code_write <- Decode_cache.invalidate decoded;
   {
     x = Bytes.make (32 * 8) '\000';
     f = Bytes.make (32 * 8) '\000';
     pc_cell = Bytes.make 8 '\000';
+    bus;
     mem;
     decoded;
     fflags = 0;
@@ -290,15 +293,15 @@ let[@inline] branch_taken op a b =
   | Bgeu -> Int64.unsigned_compare a b >= 0
 
 let load_value t op addr =
-  let m = t.mem in
+  let b = t.bus in
   match op with
-  | Lb -> sext ~bits:8 (Memory.load m addr 1)
-  | Lh -> sext ~bits:16 (Memory.load m addr 2)
-  | Lw -> sext32 (Memory.load m addr 4)
-  | Ld -> Memory.load m addr 8
-  | Lbu -> Memory.load m addr 1
-  | Lhu -> Memory.load m addr 2
-  | Lwu -> Memory.load m addr 4
+  | Lb -> sext ~bits:8 (Bus.load b addr 1)
+  | Lh -> sext ~bits:16 (Bus.load b addr 2)
+  | Lw -> sext32 (Bus.load b addr 4)
+  | Ld -> Bus.load b addr 8
+  | Lbu -> Bus.load b addr 1
+  | Lhu -> Bus.load b addr 2
+  | Lwu -> Bus.load b addr 4
 
 let store_size = function Sb -> 1 | Sh -> 2 | Sw -> 4 | Sd -> 8
 
@@ -419,6 +422,7 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
     Trap.raise_trap
       (if op = Lr then Load_address_misaligned else Store_address_misaligned)
       addr;
+  Bus.check_atomic t.bus addr size ~is_load:(op = Lr);
   let norm = match width with Word -> sext32 | Dword -> Fun.id in
   let unsigned = match width with Word -> zext32 | Dword -> Fun.id in
   match op with
@@ -467,7 +471,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Load { op; rd; rs1; offset } ->
       set t rd (load_value t op (address t rs1 offset))
   | Store { op; rs1; rs2; offset } ->
-      Memory.store t.mem (address t rs1 offset) (store_size op) (get t rs2)
+      Bus.store t.bus (address t rs1 offset) (store_size op) (get t rs2)
   | Op_imm { op; rd; rs1; imm } -> set t rd (imm_alu op (get t rs1) imm)
   | Shift_imm { op; rd; rs1; shamt } ->
       set t rd (shift_alu op (get t rs1) shamt)
@@ -497,11 +501,11 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
       set t rd old
   | Amo { op; width; rd; rs1; rs2; _ } -> amo t ~op ~width ~rd ~rs1 ~rs2
   | Fload { fmt = D; rd; rs1; offset } ->
-      setf t rd (Memory.load t.mem (address t rs1 offset) 8)
+      setf t rd (Bus.load t.bus (address t rs1 offset) 8)
   | Fload { fmt = S; rd; rs1; offset } ->
-      set_s t rd (Int64.to_int32 (Memory.load t.mem (address t rs1 offset) 4))
+      set_s t rd (Int64.to_int32 (Bus.load t.bus (address t rs1 offset) 4))
   | Fstore { fmt; rs1; rs2; offset } ->
-      Memory.store t.mem (address t rs1 offset)
+      Bus.store t.bus (address t rs1 offset)
         (if fmt = D then 8 else 4)
         (getf t rs2)
   | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _ | Fclass _ | Fcvt_to_int _
@@ -535,10 +539,18 @@ let execute t (i : Instr.t) ~len ~bits =
     faulting instruction. *)
 let step ?trace t =
   let pc = pc t in
+  let checked = not t.bus.all_ram in
+  if checked then Bus.check_fetch t.bus pc;
   let page = Memory.page_no pc and off = Memory.offset pc in
   match Decode_cache.fetch t.decoded t.mem ~page ~off with
-  | exception Decode_cache.Illegal bits -> illegal bits
+  | exception Decode_cache.Illegal bits ->
+      (* a 4-byte instruction whose second half is outside RAM read zeros
+         there: that's an access fault, not an illegal instruction *)
+      if checked && bits land 3 = 3 then Bus.check_fetch t.bus (Int64.add pc 2L);
+      illegal bits
   | { instr; len; bits } ->
+      (* the second half of a 4-byte instruction may fall outside RAM *)
+      if checked && len = 4 then Bus.check_fetch t.bus (Int64.add pc 2L);
       (match trace with Some f -> f pc instr | None -> ());
       execute t instr ~len ~bits
 

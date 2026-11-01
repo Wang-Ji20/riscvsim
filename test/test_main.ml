@@ -742,6 +742,87 @@ let test_decode_cache () =
            li a7, 93\n\
            ecall" (addi 1) (addi 5)))
 
+(* A device with eight 8-byte registers, for bus tests. *)
+module Scratch_device = struct
+  type t = Bytes.t
+
+  let name = "scratch"
+  let size = 64L
+  let read t ~offset ~size = Int64.logand (Bytes.get_int64_le t (Int64.to_int offset))
+      (if size = 8 then -1L else Int64.pred (Int64.shift_left 1L (8 * size)))
+  let write t ~offset ~size v =
+    for i = 0 to size - 1 do
+      Bytes.set_uint8 t (Int64.to_int offset + i) (Int64.to_int (Int64.shift_right_logical v (8 * i)) land 0xff)
+    done
+  let tick _ ~now:_ = ()
+end
+[@@ocamlformat "disable"]
+
+let test_bus () =
+  section "bus (system mode)";
+  let ram_base = 0x8000_0000L and ram_size = 0x10_0000L in
+  let ram_end = Int64.add ram_base ram_size in
+  let run_system ?(setup = fun _ -> ()) src =
+    let img = assemble src in
+    let bus = Bus.system ~ram_base ~ram_size in
+    Bus.attach bus ~base:0x1000_0000L
+      (Device.pack (module Scratch_device) (Bytes.make 64 '\000'));
+    let hart = Hart.create ~bus () in
+    (* the assembler links at 0x10000: move the code into RAM *)
+    List.iter
+      (fun (seg : Image.segment) ->
+        Memory.blit_bytes hart.mem (Int64.add ram_base (Int64.sub seg.vaddr 0x10000L)) seg.data)
+      img.segments;
+    Hart.set_pc hart ram_base;
+    setup hart;
+    (Hart.run ~fuel:1000 hart, hart)
+  in
+  let trapped name ~cause ~tval (outcome, _) =
+    check_eq ~pp:pp_outcome name
+      (Hart.Trapped { trap = { cause; tval }; pc = 0L })
+      (match outcome with
+      | Hart.Trapped t -> Hart.Trapped { t with pc = 0L }
+      | o -> o)
+  in
+  trapped "load outside RAM and devices faults" ~cause:Load_access_fault ~tval:0x40L
+    (run_system "li t0, 0x40\nld a0, 0(t0)");
+  trapped "fetch outside RAM faults" ~cause:Instruction_access_fault ~tval:0x1000_0000L
+    (run_system "li t0, 0x10000000\njr t0");
+  let outcome, hart =
+    run_system
+      ~setup:(fun h -> Memory.store h.mem (Int64.sub ram_end 8L) 8 0x1111L)
+      (Printf.sprintf "li t0, 0x%Lx\nli t1, -1\nsd t1, 0(t0)" (Int64.sub ram_end 4L))
+  in
+  trapped "store crossing the end of RAM faults" ~cause:Store_access_fault
+    ~tval:(Int64.sub ram_end 4L) (outcome, hart);
+  check "... and writes nothing"
+    (Memory.load hart.mem (Int64.sub ram_end 8L) 8 = 0x1111L);
+  trapped "4-byte instruction straddling the end of RAM faults at its second half"
+    ~cause:Instruction_access_fault ~tval:(Int64.sub ram_end 0L)
+    (run_system ~setup:(fun h ->
+         Memory.store h.mem (Int64.sub ram_end 2L) 2 0x0013L (* low half of nop *))
+       (Printf.sprintf "li t0, 0x%Lx\njr t0" (Int64.sub ram_end 2L)));
+  trapped "AMO on a device faults" ~cause:Store_access_fault ~tval:0x1000_0008L
+    (run_system "li t0, 0x10000008\namoadd.d a0, a1, (t0)");
+  let outcome, hart =
+    run_system
+      "li t0, 0x10000000\nli t1, 0x123456789\nsd t1, 8(t0)\nlw a0, 8(t0)\nlbu a1, 12(t0)\nebreak"
+  in
+  ignore outcome;
+  check "device registers are read and written through the bus"
+    (Hart.get_x hart 10 = 0x23456789L && Hart.get_x hart 11 = 1L);
+  let bus = Bus.system ~ram_base ~ram_size in
+  let dev = Device.pack (module Scratch_device) (Bytes.make 64 '\000') in
+  check "a device may not overlap RAM"
+    (match Bus.attach bus ~base:(Int64.sub ram_base 32L) dev with
+    | () -> false
+    | exception Invalid_argument _ -> true);
+  check "Bus.within at the top of the address space"
+    (Bus.within ~base:(-16L) ~len:16L (-4L) 4
+    && (not (Bus.within ~base:(-16L) ~len:16L (-4L) 8))
+    && Bus.within ~base:(-16L) ~len:16L (-16L) 8
+    && not (Bus.within ~base:(-16L) ~len:16L 0L 1))
+
 let test_semantics () =
   section "semantics";
   let regs_after src =
@@ -886,6 +967,7 @@ let () =
   test_assembler_errors ();
   test_semantics ();
   test_decode_cache ();
+  test_bus ();
   test_examples ();
   section "properties (QCheck2)";
   let qcheck_failures =

@@ -64,6 +64,17 @@ numbers approximately, as a sign, an exponent and a fraction. *binary32*
 **fuel.** A limit on how many instructions riscvsim will run before it
 stops, so that a looping program can't hang a test.
 
+**Access fault.** A trap raised when a program reads, writes or runs
+code at an address where there is neither RAM nor a device.
+
+**Bus.** The path between a processor and memory and devices. riscvsim's
+`Bus` decides, for each address, whether it leads to RAM, to a device, or
+to nothing (an access fault).
+
+**Device (memory-mapped).** Hardware such as a serial port or a timer
+that a program controls by reading and writing special addresses, as
+if they were memory.
+
 **Hart (hardware thread).** RISC-V's word for one processor: a set of
 registers and a program counter executing one instruction stream. A
 multi-core chip has several harts. riscvsim's `Hart` module simulates one.

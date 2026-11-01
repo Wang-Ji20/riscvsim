@@ -23,6 +23,7 @@ OCaml or emulators. When a word is unfamiliar, look it up in the
    - [Floating point](design/floating-point.md)
    - [The assembler](design/assembler.md)
    - [Running Linux programs](design/linux-emulation.md)
+   - [The bus, devices and traps](design/system-bus.md)
    - [rvlibc, our C library](design/rvlibc.md)
    - [Testing strategy](design/testing.md)
 4. **[Performance](perf/README.md)**: goals, how we measure, and the plan

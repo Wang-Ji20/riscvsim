@@ -197,8 +197,8 @@ docs/perf targets say Phases 1-5 need far less).
 - [x] 1a. Typed traps (`Trap`): RISC-V cause codes and tval; property test
       that a trapping instruction changes no architectural state
 - [x] 1b. Rename `Cpu` to `Hart`
-- [ ] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
-      stores
+- [x] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
+      stores; `Device.S` and `Device.pack`
 - [ ] 1d. `Machine`: harts, bus, devices, virtual clock
 - [ ] 1e. Pluggable environment: Linux emulation or `ecall` as a trap
 - [ ] 1f. Snapshots
