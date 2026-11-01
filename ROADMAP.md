@@ -65,9 +65,9 @@ testable. A step marked ✅ is done in the user-mode simulator.
     `mideleg`, `mcounteren`, `menvcfg`, `mconfigptr`.
 2.3 ✅ Supervisor CSRs: `stvec`, `sepc`, `scause`, `stval`, `sscratch`, `sie`,
     `sip`, `satp`, `scounteren`, `senvcfg`.
-2.4 Trap entry: vectored and direct `mtvec`/`stvec`, delegation through
+2.4 ✅ Trap entry: vectored and direct `mtvec`/`stvec`, delegation through
     `medeleg`/`mideleg`, and interrupt priority ordering.
-2.5 `mret`, `sret`, `wfi`, and `sfence.vma`. Raise illegal-instruction for
+2.5 ✅ `mret`, `sret`, `wfi`, and `sfence.vma`. Raise illegal-instruction for
     privileged ops in the wrong mode, and enforce CSR access permissions
     (read-only, privilege level).
 2.6 ✅ FP state tracking: `mstatus.FS` off/initial/clean/dirty. An FP

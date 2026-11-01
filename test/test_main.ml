@@ -980,7 +980,7 @@ let test_machine () =
   load_code m.bus "ecall";
   Hart.set_pc (Machine.hart m 0) 0x10000L;
   check_eq ~pp:pp_outcome "without an emulated environment, ecall traps"
-    (Hart.Trapped { trap = { cause = Ecall_from_u; tval = 0L }; pc = 0x10000L })
+    (Hart.Trapped { trap = { cause = Ecall_from_m; tval = 0L }; pc = 0x10000L })
     (Machine.run ~fuel:10 m)
 [@@ocamlformat "disable"]
 
@@ -1075,6 +1075,70 @@ let test_csr_file () =
      && not (Csr_file.has c Csr_file.mprv_bit));
   let outcome, hart = run_priv S Wfi in
   check "wfi in S-mode is a nop" (outcome = Hart.Out_of_fuel && Hart.pc hart = 0x10004L)
+[@@ocamlformat "disable"]
+
+(* Run [src] on one hart that delivers traps to its own handlers, until it
+   settles in a [spin: j spin] loop. *)
+let run_system_program src =
+  let img = assemble src in
+  let m = Machine.create (Bus.user ()) in
+  List.iter
+    (fun (seg : Image.segment) -> Memory.blit_bytes (Bus.ram m.bus) seg.vaddr seg.data)
+    img.segments;
+  let hart = Machine.hart m 0 in
+  hart.env <- System;
+  Hart.set_pc hart img.entry;
+  ignore (Machine.run ~fuel:200 m);
+  (hart, fun name -> List.assoc name img.symbols)
+
+let test_traps () =
+  section "trap delivery";
+  let x hart n = Hart.get_x hart n in
+  let hart, sym =
+    run_system_program
+      "la t0, handler\ncsrw mtvec, t0\nli a0, 0\n\
+       call_site: ecall\naddi a0, a0, 100\nspin: j spin\n\
+       handler: csrr a1, mcause\ncsrr a2, mepc\naddi t1, a2, 4\ncsrw mepc, t1\n\
+       addi a0, a0, 1\nmret"
+  in
+  check_eq ~pp:(fun (a, b, c) -> Printf.sprintf "%Ld %Ld %Lx" a b c)
+    "M-mode ecall: handler sees cause 11 and mepc, mret resumes after it"
+    (101L, 11L, sym "call_site") (x hart 10, x hart 11, x hart 12);
+  let hart, sym =
+    run_system_program
+      "la t0, mhandler\ncsrw mtvec, t0\nla t0, shandler\ncsrw stvec, t0\n\
+       li t0, 0x100\ncsrw medeleg, t0\nla t0, user\ncsrw mepc, t0\nmret\n\
+       user: ecall\n\
+       bad: csrr a0, mstatus\n\
+       spin: j spin\n\
+       shandler: csrr s0, scause\ncsrr s1, sepc\ncsrr s2, sstatus\n\
+       addi t1, s1, 4\ncsrw sepc, t1\nsret\n\
+       mhandler: csrr s3, mcause\ncsrr s4, mtval\ncsrr s5, mstatus\ncsrr s6, mepc\n\
+       mspin: j mspin"
+  in
+  check_eq ~pp:(fun (a, b, c) -> Printf.sprintf "%Ld %Lx %Ld" a b c)
+    "a delegated U-mode ecall reaches S-mode with SPP = U"
+    (8L, sym "user", 0L) (x hart 8, x hart 9, Int64.logand (x hart 18) 0x100L);
+  check_eq ~pp:(fun (a, b, c, d) -> Printf.sprintf "%Ld %Lx %Ld %Lx" a b c d)
+    "an undelegated U-mode fault reaches M-mode with MPP = U and the bits in mtval"
+    (2L, 0x30002573L, 0L, sym "bad")
+    (x hart 19, x hart 20, Int64.logand (x hart 21) 0x1800L, x hart 22);
+  check "... and the hart is in M-mode" (hart.csrs.priv = M);
+  let hart, sym =
+    run_system_program
+      "la t0, handler\nori t0, t0, 1\ncsrw mtvec, t0\necall\nspin: j spin\n\
+       .align 6\nhandler: csrr a0, mcause\nhspin: j hspin"
+  in
+  check "vectored mtvec: exceptions still go to the base address"
+    (x hart 10 = 11L && Hart.pc hart = sym "hspin");
+  let hart, _ =
+    run_system_program
+      "la t0, handler\ncsrw mtvec, t0\nli t0, 0x800\ncsrw mstatus, t0\n\
+       la t0, super\ncsrw mepc, t0\nmret\nsuper: ecall\nspin: j spin\n\
+       handler: csrr a0, mcause\ncsrr a1, mstatus\nhspin: j hspin"
+  in
+  check "an S-mode ecall has cause 9 and MPP = S"
+    (x hart 10 = 9L && Int64.logand (x hart 11) 0x1800L = 0x800L)
 [@@ocamlformat "disable"]
 
 let test_semantics () =
@@ -1224,6 +1288,7 @@ let () =
   test_bus ();
   test_machine ();
   test_csr_file ();
+  test_traps ();
   test_examples ();
   section "properties (QCheck2)";
   let qcheck_failures =

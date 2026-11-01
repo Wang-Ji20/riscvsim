@@ -51,5 +51,11 @@ let code cause = fst (info cause)
 let name cause = snd (info cause)
 let raise_trap cause tval = raise (Trap { cause; tval })
 
+(** The environment-call cause for each privilege level. *)
+let ecall_from : Priv.t -> cause = function
+  | U -> Ecall_from_u
+  | S -> Ecall_from_s
+  | M -> Ecall_from_m
+
 let pp ppf { cause; tval } =
   Format.fprintf ppf "%s (cause %d, tval 0x%Lx)" (name cause) (code cause) tval

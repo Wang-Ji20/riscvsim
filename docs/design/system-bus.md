@@ -107,14 +107,18 @@ a store pays one extra comparison.
 
 ## The environment
 
-What `ecall` does is the one thing that differs between running a
-program as a Linux process and running a whole machine. A hart's `env`
-says which:
+What happens on `ecall` and on other traps is what differs between
+running a program as a Linux process and running a whole machine. A
+hart's `env` says which:
 
-- `Emulated handler`: the simulator handles the call. `Os` installs a
-  handler that emulates Linux system calls.
-- `Trapping` (the default): `ecall` raises a trap with cause "environment
-  call", for the guest's own kernel or firmware to handle.
+| `env` | `ecall` | other traps | Used by |
+|---|---|---|---|
+| `Emulated handler` | the handler runs (system call emulation) | stop the run | `Os` |
+| `Bare` (default) | raises a trap | stop the run | tests, HTIF test programs |
+| `System` | delivered to the guest | delivered to the guest | whole machines |
+
+"Delivered" means the hart jumps to the guest's own trap handler, as
+real hardware does (see [privileged](privileged.md#taking-a-trap)).
 
 ## Devices
 

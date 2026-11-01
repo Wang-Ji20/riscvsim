@@ -282,10 +282,63 @@ let write t n v =
       t.pmpaddr.(n - Csr.pmpaddr0) <- Int64.logand v pmpaddr_mask
   | _ -> () (* misa, ids, hpm counters and events: read-only or hardwired *)
 
-(* {1 Returning from a trap} *)
+(* {1 Taking a trap} *)
 
 let set_bit v mask on =
   if on then Int64.logor v mask else Int64.logand v (Int64.lognot mask)
+
+
+let interrupt_bit = Int64.min_int
+
+(** The handler address in [tvec]: its base, or for an interrupt in
+    vectored mode (mode 1), base + 4 * cause. *)
+let handler tvec ~code ~interrupt =
+  let base = Int64.logand tvec (-4L) in
+  if interrupt && Int64.logand tvec 3L = 1L then
+    Int64.add base (Int64.of_int (4 * code))
+  else base
+
+(** Enter the trap handler for cause [code] raised at [pc] (ROADMAP 2.4).
+    A trap goes to S-mode if it happened below M-mode and M-mode delegated
+    it (medeleg for exceptions, mideleg for interrupts); otherwise to
+    M-mode. The handler's level records the cause, pc and tval, saves the
+    interrupt enable and previous privilege, and disables interrupts.
+    Returns the handler's address. *)
+let take_trap t ~code ~interrupt ~tval ~pc =
+  let delegated =
+    Int64.logand (if interrupt then t.mideleg else t.medeleg) (bit code) <> 0L
+  in
+  let cause =
+    Int64.logor (Int64.of_int code) (if interrupt then interrupt_bit else 0L)
+  in
+  if t.priv <> M && delegated then (
+    t.scause <- cause;
+    t.sepc <- pc;
+    t.stval <- tval;
+    let s = t.mstatus in
+    let s = set_bit s spie_bit (Int64.logand s sie_bit <> 0L) in
+    let s = set_bit s sie_bit false in
+    let s = set_bit s spp_bit (t.priv = S) in
+    t.mstatus <- s;
+    t.priv <- S;
+    handler t.stvec ~code ~interrupt)
+  else (
+    t.mcause <- cause;
+    t.mepc <- pc;
+    t.mtval <- tval;
+    let s = t.mstatus in
+    let s = set_bit s mpie_bit (Int64.logand s mie_bit <> 0L) in
+    let s = set_bit s mie_bit false in
+    let s =
+      Int64.logor
+        (Int64.logand s (Int64.lognot mpp_field))
+        (Int64.shift_left (Int64.of_int (Priv.to_int t.priv)) 11)
+    in
+    t.mstatus <- s;
+    t.priv <- M;
+    handler t.mtvec ~code ~interrupt)
+
+(* {1 Returning from a trap} *)
 
 (** [mret]: return to the privilege saved in MPP, restoring MIE from MPIE.
     MPIE becomes 1 and MPP becomes U. Leaving M-mode clears MPRV. Returns

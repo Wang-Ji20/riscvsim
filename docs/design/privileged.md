@@ -85,6 +85,41 @@ flag, sets FS to Dirty. Linux relies on this: when switching between
 programs, it saves the FP registers only if FS is Dirty, and it starts
 programs with FS = Initial. `Os` does the same.
 
+## Taking a trap
+
+In a `System` environment, a trap doesn't stop the simulation: the hart
+jumps to the guest's trap handler, as hardware does. First it picks the
+level that handles it:
+
+```
+trap raised at privilege P
+        |
+        v
+  P below M and the cause's bit set in medeleg?  -- yes -->  S-mode handler
+  (mideleg for interrupts)                       -- no  -->  M-mode handler
+```
+
+So M-mode firmware can hand ordinary faults (page faults, system calls
+from programs) straight to the kernel in S-mode, without running itself.
+A trap never goes to a lower level than the one it was raised in.
+
+Then, for the chosen level (M shown; S uses `sepc`, `scause`, ...):
+
+| Step | M-mode |
+|---|---|
+| where it happened | `mepc` <- pc of the trapping instruction |
+| why | `mcause` <- cause number (bit 63 set for interrupts) |
+| detail | `mtval` <- tval (the address, or the instruction's bits) |
+| interrupts | `MPIE` <- `MIE`; `MIE` <- 0 |
+| previous level | `MPP` <- P |
+| new level | M |
+| jump | `mtvec` base, or base + 4 x cause for an interrupt in vectored mode |
+
+`mret` undoes exactly this, so a handler can fix the problem and return.
+The trapping instruction doesn't count as executed (`instret` doesn't
+move), and `ecall` reports the level it came from: cause 8, 9 or 11 for
+U, S or M.
+
 ## Privileged instructions
 
 | Instruction | Does | Illegal when |

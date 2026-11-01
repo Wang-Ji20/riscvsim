@@ -138,9 +138,10 @@ directly.
   decodes them as hardware would. Self-modifying code and compressed
   instructions work for that reason.
 - **Small, swappable pieces.** The hart doesn't know about Linux. Its
-  environment is either `Emulated handler` (`Os` installs one) or
-  `Trapping`. That is what lets a system-mode machine run the guest's
-  own operating system without touching the hart.
+  environment is `Emulated handler` (`Os` installs one), `Bare`, or
+  `System`, which delivers traps to the guest's own handlers. That is
+  what lets a system-mode machine run the guest's own operating system
+  without touching the hart.
 - **Trust, but verify against oracles.** Every important behaviour is
   checked against something independent: clang, glibc, the host OCaml
   runtime, reference signatures, or Spike. See

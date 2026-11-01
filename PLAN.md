@@ -200,7 +200,7 @@ docs/perf targets say Phases 1-5 need far less).
 - [x] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
       stores; `Device.S` and `Device.pack`
 - [x] 1d. `Machine`: harts, bus, devices, virtual clock; `mhartid`
-- [x] 1e. Pluggable environment (`Hart.env`): `Emulated` or `Trapping`
+- [x] 1e. Pluggable environment (`Hart.env`): `Emulated`, `Bare` (and `System`, 2d)
 - [x] 1f. Snapshots (`Snapshot.save`/`restore`, versioned binary format,
       device state through `Device.S`). A command-line option waits for
       the system-mode `run` command (Phases 4-5).
@@ -215,7 +215,8 @@ Phase 1 is complete.
       counter enables; harts reset to M-mode
 - [x] 2c. `mret`, `sret`, `wfi`, `sfence.vma` (encoding, assembly, semantics,
       wrong-mode checks)
-- [ ] 2d. Trap delivery (`System` environment), delegation, wrong-mode checks
+- [x] 2d. Trap delivery (`System` environment), delegation, vectored tvec;
+      ecall reports the current privilege
 - [ ] 2e. Conformance in system mode: stock `p` env, rv64mi/si, arch-test in M-mode
 - [ ] 2f. `Os` processes run in U-mode
 - [ ] 2g. Interrupts

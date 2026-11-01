@@ -11,10 +11,12 @@ type env =
   | Emulated of (t -> unit)
       (** The simulator handles the call itself, as {!Os} emulates Linux system
           calls for a user-mode process. *)
-  | Trapping
-      (** [ecall] raises a trap, as on real hardware, for the guest's own
-          operating system or firmware to handle. Until privilege levels exist
-          (ROADMAP Phase 2) it reports an ecall from U-mode. *)
+  | Bare
+      (** No environment: [ecall] raises a trap, and any trap stops the run. For
+          tests and bare-metal programs that report through HTIF. *)
+  | System
+      (** A whole machine: every trap, [ecall] included, is delivered to the
+          guest's own trap handler (mtvec/stvec), as on real hardware. *)
 
 (* Registers live in [Bytes] rather than an [int64 array]: an array stores
    each int64 as a separate heap block, so every register write allocated.
@@ -56,7 +58,7 @@ let create ?(hartid = 0) ?(bus = Bus.user ()) () =
     frm = 0;
     instret = 0;
     exit_code = None;
-    env = Trapping;
+    env = Bare;
     csrs = Csr_file.create ~hartid;
   }
 
@@ -510,7 +512,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Ecall -> (
       match t.env with
       | Emulated handle -> handle t
-      | Trapping -> Trap.raise_trap Ecall_from_u 0L)
+      | Bare | System -> Trap.raise_trap (Trap.ecall_from t.csrs.priv) 0L)
   | Ebreak -> Trap.raise_trap Breakpoint pc
   | Csr { op; rd; src; csr } ->
       let v, writes =
@@ -593,7 +595,7 @@ let execute t (i : Instr.t) ~len ~bits =
 
 (** Execute one instruction. Raises [Trap] on an exception, leaving [pc] at the
     faulting instruction. *)
-let step ?trace t =
+let step_or_raise ?trace t =
   let pc = pc t in
   let checked = not t.bus.all_ram in
   if checked then Bus.check_fetch t.bus pc;
@@ -610,6 +612,24 @@ let step ?trace t =
       (match trace with Some f -> f pc instr | None -> ());
       execute t instr ~len ~bits
 
+let delivers_traps t =
+  match t.env with System -> true | Emulated _ | Bare -> false
+
+(** Deliver [trap], raised by the instruction at pc, to the guest's handler. The
+    trapping instruction didn't retire. *)
+let deliver t (trap : Trap.t) =
+  set_pc t
+    (Csr_file.take_trap t.csrs ~code:(Trap.code trap.cause) ~interrupt:false
+       ~tval:trap.tval ~pc:(pc t))
+
+(** Execute one instruction. A trap is delivered to the guest in a [System]
+    environment; otherwise [Trap.Trap] is raised, with [pc] left at the faulting
+    instruction. *)
+let step ?trace t =
+  match step_or_raise ?trace t with
+  | () -> ()
+  | exception Trap.Trap trap when delivers_traps t -> deliver t trap
+
 type outcome =
   | Exited of int
   | Trapped of { trap : Trap.t; pc : int64 }
@@ -622,8 +642,12 @@ let run ?(fuel = max_int) ?trace t =
     | Some code -> Exited code
     | None when n >= fuel -> Out_of_fuel
     | None -> (
-        match step ?trace t with
+        match step_or_raise ?trace t with
         | () -> loop (n + 1)
-        | exception Trap.Trap trap -> Trapped { trap; pc = pc t })
+        | exception Trap.Trap trap ->
+            if delivers_traps t then (
+              deliver t trap;
+              loop (n + 1))
+            else Trapped { trap; pc = pc t })
   in
   loop 0
