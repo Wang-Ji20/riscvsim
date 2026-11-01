@@ -1,0 +1,15 @@
+; Benchmarks (docs/perf/method.md). `dune build @bench` prints a table;
+; `dune exec bench/run.exe -- --csv docs/perf/results.csv` also records it.
+
+(executable
+ (name run)
+ (libraries riscv unix))
+
+(rule
+ (alias bench)
+ (deps
+  run.exe
+  (glob_files micro/*.s)
+  (glob_files micro/*.expected))
+ (action
+  (run %{dep:run.exe})))

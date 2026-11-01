@@ -134,6 +134,7 @@ guest/tests/     C test programs
 guest/ocaml/     OCaml test programs
 guest/ocamlrun/  script that cross-builds OCaml's bytecode interpreter
 test/            the test suites (see the user manual, section 8)
+bench/           benchmarks and their harness (see docs/perf)
 docs/            this documentation
 ```
 

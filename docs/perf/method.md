@@ -26,19 +26,43 @@ Rules for benchmarks:
   CoreMark) may be used as extra inputs, kept outside the repository like
   the conformance suites.
 
+Today's set is the micro benchmarks in `bench/micro/`. Each `.s` file
+has a `.expected` file holding its output, which was checked against an
+independent model of the same computation (a few lines of Python):
+
+| Benchmark | Work | Instructions |
+|-----------|------|-------------:|
+| `int_loop` | xorshift random numbers, summed | 22.5 M |
+| `memory` | 300 passes over a 64 KiB array | 17.2 M |
+| `branches` | a branch on a pseudo-random bit | 25.5 M |
+| `fp` | convert, fused multiply-add, divide, square root | 18.0 M |
+| `calls` | recursive Fibonacci, fib(29) | 18.3 M |
+| `syscalls` | 300,000 `getpid` calls | 1.5 M |
+
+`int_loop` and `calls` also run assembled with compressed instructions
+(`int_loop/rvc`, `calls/rvc`). C kernels and the OCaml stress test are
+still to be added.
+
 ## 2. Collecting data
 
-A harness (`bench/run.exe`, to be built) runs every benchmark and records
-one row per run:
+The harness `bench/run.exe` runs every benchmark and records:
 
 - the guest instruction count (from the simulator's `instret` counter)
 - wall-clock time, and from these two, MIPS
-- OCaml allocation, from `Gc.quick_stat` before and after the run
-- peak memory (resident set size)
-- host CPU counters when `perf stat` is available: cycles, instructions,
-  branch misses, cache misses
-- metadata: git commit, host CPU model, OCaml version, compiler flags,
-  date
+- OCaml allocation per guest instruction, from `Gc.minor_words` before
+  and after the run
+- peak memory (resident set size, `VmHWM` in `/proc/self/status`)
+- metadata: date, git commit, host CPU model, OCaml version
+
+Each run happens in a forked child process, so it starts with a fresh
+heap and its peak memory belongs to that run alone. Host CPU counters
+are not collected automatically; use `perf stat` by hand (section 3).
+
+```
+dune build @bench                                     # print the table
+dune exec bench/run.exe -- --csv docs/perf/results.csv  # also record it
+dune exec bench/run.exe -- --filter calls --runs 3      # a subset
+```
 
 Each benchmark runs **once to warm up, then 5 times**. We report the
 **median** and the spread (minimum and maximum). Results are written as
@@ -51,10 +75,12 @@ frequency if possible, and compare only numbers taken on the same machine.
 
 Use these from cheapest to most detailed.
 
-1. **Built-in statistics** (`riscvsim run --stats`, to be added). The
-   simulator counts executed instructions by kind, memory page lookups,
-   decode work and syscalls. It's cheap enough to leave on, and it answers
-   "what is the guest doing?".
+1. **Built-in statistics.** `riscvsim run --stats` prints the
+   instruction count, run time, MIPS and allocation per instruction. It
+   costs nothing. `riscvsim run --profile` counts executions per
+   instruction address and prints the most executed mnemonics and
+   instructions. It slows the run down, and it answers "what is the
+   guest doing?".
 2. **`perf stat`.** Host CPU counters for the whole run. Dividing host
    instructions by guest instructions gives the overall cost of one
    simulated instruction.

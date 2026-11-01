@@ -162,3 +162,17 @@ Live checklist, updated as work lands.
       sticky bit, and OF lost when c is below the product's ulp
 - [x] A 1.3M-instruction run (seed 99) found a third FMA bug: a finite
       product with an overflowing sum. The scaled path now always scales down.
+
+---
+
+# Phase 8: performance (docs/perf/plan.md)
+
+Chosen before Phase 1 because every later phase multiplies instruction
+counts, and O1–O2 and O4 don't depend on the Hart/Bus split. O3 (software
+TLB) waits for the Phase 1 bus design.
+
+- [x] O1a. `riscvsim run --stats` and `--profile` (`Stats`)
+- [x] O1b. Micro benchmarks (`bench/micro`) and the harness `bench/run.exe`
+- [ ] O1c. Baseline in `docs/perf/results.csv`
+- [ ] O2. Unboxed registers
+- [ ] O4. Decode cache
