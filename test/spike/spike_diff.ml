@@ -67,7 +67,9 @@ let with_default_rm (i : Instr.t) =
 *)
 let make_safe (i : Instr.t) : Instr.t option =
   match i with
-  | Jal _ | Jalr _ | Branch _ | Ecall | Ebreak -> None
+  | Jal _ | Jalr _ | Branch _ | Ecall | Ebreak | Mret | Sret | Wfi
+  | Sfence_vma _ ->
+      None
   | Load { op; rd; offset; _ } ->
       Some
         (Load

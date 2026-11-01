@@ -73,7 +73,8 @@ let table =
   @ range 0xc03 3 31 "hpmcounter"
   @ range 0xb03 3 31 "mhpmcounter"
   @ range 0x323 3 31 "mhpmevent"
-  @ range pmpcfg0 0 15 "pmpcfg"
+  (* RV64 has only the even pmpcfg registers; the odd ones are RV32-only *)
+  @ List.init 8 (fun i -> (pmpcfg0 + (2 * i), "pmpcfg" ^ string_of_int (2 * i)))
   @ range pmpaddr0 0 63 "pmpaddr"
 [@@ocamlformat "disable"]
 

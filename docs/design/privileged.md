@@ -85,6 +85,24 @@ flag, sets FS to Dirty. Linux relies on this: when switching between
 programs, it saves the FP registers only if FS is Dirty, and it starts
 programs with FS = Initial. `Os` does the same.
 
+## Privileged instructions
+
+| Instruction | Does | Illegal when |
+|---|---|---|
+| `mret` | return from an M-mode trap handler: privilege from `mstatus.MPP`, `MIE` from `MPIE`, jump to `mepc` | not in M-mode |
+| `sret` | the same for S-mode, with `SPP`, `SIE`, `SPIE` and `sepc` | in U-mode, or in S-mode with `mstatus.TSR` |
+| `wfi` | wait for an interrupt | in U-mode, or in S-mode with `mstatus.TW` |
+| `sfence.vma` | flush cached address translations | in U-mode, or in S-mode with `mstatus.TVM` |
+
+After a return, `MPIE`/`SPIE` become 1 and `MPP`/`SPP` become U, so a
+handler that forgets to set them can't accidentally return to a higher
+level. Leaving M-mode also clears `MPRV`.
+
+`wfi` is allowed to return at once, and does, since there are no
+interrupts yet. `sfence.vma` does nothing until there is address
+translation with a cache to flush (Phase 3). U-mode `wfi` is illegal,
+as in Spike.
+
 ## What stays in the hart
 
 The FP CSRs (`fflags`, `frm`, `fcsr`) and the counters are fields of the

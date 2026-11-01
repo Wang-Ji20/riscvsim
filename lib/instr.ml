@@ -79,6 +79,12 @@ type t =
   | Fence_i
   | Ecall
   | Ebreak
+  (* Privileged *)
+  | Mret
+  | Sret
+  | Wfi
+  | Sfence_vma of { rs1 : Reg.t; rs2 : Reg.t }
+      (** [rs1]: virtual address, [rs2]: address space (zero: all) *)
   (* Zicsr *)
   | Csr of { op : csr_op; rd : Reg.t; src : csr_src; csr : int }
   (* A *)
@@ -279,6 +285,10 @@ let pp ppf =
   | Fence_i -> pp_print_string ppf "fence.i"
   | Ecall -> pp_print_string ppf "ecall"
   | Ebreak -> pp_print_string ppf "ebreak"
+  | Mret -> pp_print_string ppf "mret"
+  | Sret -> pp_print_string ppf "sret"
+  | Wfi -> pp_print_string ppf "wfi"
+  | Sfence_vma { rs1; rs2 } -> fprintf ppf "sfence.vma %a, %a" r rs1 r rs2
   | Csr { op; rd; src = Rs1 rs1; csr } ->
       fprintf ppf "%s %a, %a, %a" (name csr_ops op) r rd pp_csr csr r rs1
   | Csr { op; rd; src = Uimm u; csr } ->

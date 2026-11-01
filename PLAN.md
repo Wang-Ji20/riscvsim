@@ -213,7 +213,8 @@ Phase 1 is complete.
 - [x] 2b. CSR file: one name table (`Csr`), M/S CSRs with WARL rules,
       access checks, mstatus.FS (Off traps, writes make it Dirty),
       counter enables; harts reset to M-mode
-- [ ] 2c. `mret`, `sret`, `wfi`, `sfence.vma`
+- [x] 2c. `mret`, `sret`, `wfi`, `sfence.vma` (encoding, assembly, semantics,
+      wrong-mode checks)
 - [ ] 2d. Trap delivery (`System` environment), delegation, wrong-mode checks
 - [ ] 2e. Conformance in system mode: stock `p` env, rv64mi/si, arch-test in M-mode
 - [ ] 2f. `Os` processes run in U-mode

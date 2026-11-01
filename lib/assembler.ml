@@ -357,6 +357,18 @@ let () =
   (* system *)
   simple "ecall" (fun _ _ -> Ecall);
   simple "ebreak" (fun _ _ -> Ebreak);
+  simple "mret" (fun _ _ -> Mret);
+  simple "sret" (fun _ _ -> Sret);
+  simple "wfi" (fun _ _ -> Wfi);
+  simple "sfence.vma" (function
+    | [] -> fun _ -> Sfence_vma { rs1 = Reg.zero; rs2 = Reg.zero }
+    | [ a ] ->
+        let rs1 = reg a in
+        fun _ -> Sfence_vma { rs1; rs2 = Reg.zero }
+    | [ a; b ] ->
+        let rs1 = reg a and rs2 = reg b in
+        fun _ -> Sfence_vma { rs1; rs2 }
+    | _ -> error "sfence.vma expects at most rs1, rs2");
   simple "fence.i" (fun _ _ -> Fence_i);
   let fence_set = function
     | P.Expr (P.Sym s) ->

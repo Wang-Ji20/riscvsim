@@ -147,6 +147,11 @@ let decode (w : int) : Instr.t option =
     match funct3 with
     | 0 when w = 0x00000073 -> Some Ecall
     | 0 when w = 0x00100073 -> Some Ebreak
+    | 0 when w = 0x30200073 -> Some Mret
+    | 0 when w = 0x10200073 -> Some Sret
+    | 0 when w = 0x10500073 -> Some Wfi
+    | 0 when funct7 = 0x09 && field w ~hi:11 ~lo:7 = 0 ->
+        Some (Sfence_vma { rs1; rs2 })
     | 1 | 2 | 3 | 5 | 6 | 7 ->
         let+ op = lookup Opcode.csr_funct3 (funct3 land 3) in
         let src = if funct3 >= 4 then Uimm rs1_n else Rs1 rs1 in

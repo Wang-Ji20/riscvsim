@@ -128,6 +128,13 @@ let encode_int (i : Instr.t) : (int, string) result =
   | Fence_i -> Ok 0x0000100f
   | Ecall -> Ok 0x00000073
   | Ebreak -> Ok 0x00100073
+  | Mret -> Ok 0x30200073
+  | Sret -> Ok 0x10200073
+  | Wfi -> Ok 0x10500073
+  | Sfence_vma { rs1; rs2 } ->
+      Ok
+        (r_type ~opcode:Opcode.system ~funct3:0 ~funct7:0x09 ~rd:0 ~rs1:(x rs1)
+           ~rs2:(x rs2))
   | Csr { op; rd; src; csr } ->
       let* () = check_unsigned ~bits:12 ~what:"CSR number" csr in
       let base = List.assoc op Opcode.csr_funct3 in

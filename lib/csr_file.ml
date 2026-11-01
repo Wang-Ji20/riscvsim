@@ -282,6 +282,39 @@ let write t n v =
       t.pmpaddr.(n - Csr.pmpaddr0) <- Int64.logand v pmpaddr_mask
   | _ -> () (* misa, ids, hpm counters and events: read-only or hardwired *)
 
+(* {1 Returning from a trap} *)
+
+let set_bit v mask on =
+  if on then Int64.logor v mask else Int64.logand v (Int64.lognot mask)
+
+(** [mret]: return to the privilege saved in MPP, restoring MIE from MPIE.
+    MPIE becomes 1 and MPP becomes U. Leaving M-mode clears MPRV. Returns
+    the new pc, mepc. *)
+let mret t =
+  let target =
+    legal_priv (Int64.to_int (Int64.shift_right_logical t.mstatus 11) land 3)
+  in
+  let s = t.mstatus in
+  let s = set_bit s mie_bit (Int64.logand s mpie_bit <> 0L) in
+  let s = set_bit s mpie_bit true in
+  let s = Int64.logand s (Int64.lognot mpp_field) in
+  let s = if target <> M then Int64.logand s (Int64.lognot mprv_bit) else s in
+  t.mstatus <- s;
+  t.priv <- target;
+  t.mepc
+
+(** [sret]: the same for S-mode, with SPP, SIE and SPIE. The target is never
+    M, so MPRV is cleared. Returns sepc. *)
+let sret t =
+  let target = if has t spp_bit then Priv.S else U in
+  let s = t.mstatus in
+  let s = set_bit s sie_bit (Int64.logand s spie_bit <> 0L) in
+  let s = set_bit s spie_bit true in
+  let s = Int64.logand s (Int64.lognot (Int64.logor spp_bit mprv_bit)) in
+  t.mstatus <- s;
+  t.priv <- target;
+  t.sepc
+
 (* {1 Snapshots} *)
 
 (** Every stateful register, as (CSR number, value), plus the privilege level

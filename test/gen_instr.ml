@@ -62,7 +62,9 @@ let instr ?(fence_nonempty = false) () : Instr.t G.t =
       (let lo = if fence_nonempty then 1 else 0 in
        let+ pred = G.int_range lo 15 and+ succ = G.int_range lo 15 in
        Fence { pred; succ });
-      G.oneof_list [ Fence_i; Ecall; Ebreak ];
+      G.oneof_list [ Fence_i; Ecall; Ebreak; Mret; Sret; Wfi ];
+      (let+ rs1 = reg and+ rs2 = reg in
+       Sfence_vma { rs1; rs2 });
       (let+ op = of_table csr_ops
        and+ rd = reg
        and+ src =

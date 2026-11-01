@@ -1027,6 +1027,54 @@ let test_csr_file () =
   check_eq ~pp:pp_outcome "an FP instruction with the FPU off is illegal"
     (Hart.Trapped { trap = { cause = Illegal_instruction; tval = 0xf2000053L }; pc = 0x10000L })
     (Hart.run ~fuel:1 hart)
+;
+  (* privileged instructions: run one on a fresh hart at a given privilege *)
+  let run_priv ?(setup = fun _ -> ()) priv i =
+    let hart = Hart.create () in
+    Memory.store hart.mem 0x10000L 4 (Int64.of_int (encode_exn i));
+    Hart.set_pc hart 0x10000L;
+    hart.csrs.priv <- priv;
+    setup hart.csrs;
+    let outcome = Hart.run ~fuel:1 hart in
+    (outcome, hart)
+  in
+  let illegal name ?setup priv i =
+    let outcome, _ = run_priv ?setup priv i in
+    check name
+      (match outcome with
+       | Hart.Trapped { trap = { cause = Illegal_instruction; _ }; _ } -> true
+       | _ -> false)
+  in
+  let sfence = Sfence_vma { rs1 = Reg.zero; rs2 = Reg.zero } in
+  let set_bit b (c : Csr_file.t) = c.mstatus <- Int64.logor c.mstatus b in
+  illegal "mret in S-mode is illegal" S Mret;
+  illegal "sret in U-mode is illegal" U Sret;
+  illegal "sret in S-mode with TSR is illegal" S Sret ~setup:(set_bit Csr_file.tsr_bit);
+  illegal "wfi in U-mode is illegal" U Wfi;
+  illegal "wfi in S-mode with TW is illegal" S Wfi ~setup:(set_bit Csr_file.tw_bit);
+  illegal "sfence.vma in U-mode is illegal" U sfence;
+  illegal "sfence.vma in S-mode with TVM is illegal" S sfence ~setup:(set_bit Csr_file.tvm_bit);
+  let _, hart =
+    run_priv M Mret ~setup:(fun c ->
+        c.mstatus <- Int64.logor c.mstatus (Int64.logor Csr_file.mpie_bit (Int64.shift_left 1L 11));
+        c.mepc <- 0x4000L)
+  in
+  let c = hart.csrs in
+  check "mret: to MPP (S), at mepc" (c.priv = S && Hart.pc hart = 0x4000L);
+  check "mret: MIE <- MPIE, MPIE <- 1, MPP <- U"
+    (Csr_file.has c Csr_file.mie_bit && Csr_file.has c Csr_file.mpie_bit
+     && Int64.logand c.mstatus Csr_file.mpp_field = 0L);
+  let _, hart =
+    run_priv S Sret ~setup:(fun c ->
+        c.mstatus <- Int64.logor c.mstatus Csr_file.mprv_bit;
+        c.sepc <- 0x5000L)
+  in
+  let c = hart.csrs in
+  check "sret: to SPP (U), at sepc, SPIE <- 1, MPRV cleared"
+    (c.priv = U && Hart.pc hart = 0x5000L && Csr_file.has c Csr_file.spie_bit
+     && not (Csr_file.has c Csr_file.mprv_bit));
+  let outcome, hart = run_priv S Wfi in
+  check "wfi in S-mode is a nop" (outcome = Hart.Out_of_fuel && Hart.pc hart = 0x10004L)
 [@@ocamlformat "disable"]
 
 let test_semantics () =

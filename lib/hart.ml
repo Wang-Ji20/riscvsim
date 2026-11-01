@@ -549,7 +549,18 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _ | Fclass _ | Fcvt_to_int _
   | Fcvt_of_int _ | Fcvt_fmt _ | Fmv_to_int _ | Fmv_of_int _ ->
       fp_exec t ~bits i
-  | Jal _ | Jalr _ | Branch _ -> assert false
+  | Wfi ->
+      (* Without interrupts there is nothing to wait for, so wfi is a nop, as
+         the spec allows. U-mode may not use it, nor S-mode when TW is set. *)
+      let c = t.csrs in
+      if c.priv = U || (c.priv = S && Csr_file.has c Csr_file.tw_bit) then
+        illegal bits
+  | Sfence_vma _ ->
+      (* No TLB yet (ROADMAP 3.5), so nothing to flush. *)
+      let c = t.csrs in
+      if c.priv = U || (c.priv = S && Csr_file.has c Csr_file.tvm_bit) then
+        illegal bits
+  | Jal _ | Jalr _ | Branch _ | Mret | Sret -> assert false
 
 (* Each case sets [pc] itself: a shared [let next_pc = match ...] would box
    the int64 in every case. *)
@@ -568,6 +579,13 @@ let execute t (i : Instr.t) ~len ~bits =
       set_pc t
         (if branch_taken op (get t rs1) (get t rs2) then offset_from pc offset
          else next)
+  | Mret ->
+      if t.csrs.priv <> M then illegal bits else set_pc t (Csr_file.mret t.csrs)
+  | Sret ->
+      let c = t.csrs in
+      if c.priv = U || (c.priv = S && Csr_file.has c Csr_file.tsr_bit) then
+        illegal bits
+      else set_pc t (Csr_file.sret c)
   | _ ->
       execute_straight t i ~pc ~bits;
       set_pc t next);
