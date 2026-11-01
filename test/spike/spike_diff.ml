@@ -224,9 +224,9 @@ let on_riscvsim elf =
   | Ok { image; _ } -> (
       let os = Os.boot ~io:(Os.buffer_io (Buffer.create 16)) image in
       match Os.run ~fuel:10_000_000 os with
-      | Cpu.Exited 0 ->
-          Option.to_result ~none:"no signature" (Os.signature os.cpu image)
-      | Cpu.Trapped { trap; pc } ->
+      | Hart.Exited 0 ->
+          Option.to_result ~none:"no signature" (Os.signature os.hart image)
+      | Hart.Trapped { trap; pc } ->
           Error (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
       | _ -> Error "did not halt")
 

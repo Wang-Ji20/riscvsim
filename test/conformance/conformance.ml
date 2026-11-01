@@ -108,22 +108,22 @@ let simulate elf =
   | Error e -> Error e
   | Ok { image; _ } ->
       let os = Os.boot ~io:(Os.buffer_io (Buffer.create 64)) image in
-      Ok (image, os.cpu, Cpu.run ~fuel:500_000_000 os.cpu)
+      Ok (image, os.hart, Hart.run ~fuel:500_000_000 os.hart)
 
 let check t elf =
   match simulate elf with
   | Error e -> Fail e
-  | Ok (image, cpu, outcome) -> (
+  | Ok (image, hart, outcome) -> (
       match (t.expect, outcome) with
-      | Exit_zero, Cpu.Exited 0 -> Pass
-      | Exit_zero, Cpu.Exited n -> Fail (Printf.sprintf "test case %d failed" n)
-      | Signature ref, Cpu.Exited 0 -> (
-          match Os.signature cpu image with
+      | Exit_zero, Hart.Exited 0 -> Pass
+      | Exit_zero, Hart.Exited n -> Fail (Printf.sprintf "test case %d failed" n)
+      | Signature ref, Hart.Exited 0 -> (
+          match Os.signature hart image with
           | Some s when s = In_channel.with_open_bin ref In_channel.input_all -> Pass
           | Some _ -> Fail "signature differs from the reference"
           | None -> Fail "no signature symbols")
-      | _, Cpu.Trapped { trap; pc } -> Fail (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
-      | _, (Cpu.Exited _ | Cpu.Out_of_fuel) -> Fail "did not exit cleanly")
+      | _, Hart.Trapped { trap; pc } -> Fail (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
+      | _, (Hart.Exited _ | Hart.Out_of_fuel) -> Fail "did not exit cleanly")
 
 let run_test t =
   match List.assoc_opt t.name skipped with

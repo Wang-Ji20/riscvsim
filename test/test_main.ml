@@ -37,17 +37,17 @@ let assemble ?rvc src =
 
 let run_image ?(fuel = 10_000_000) img =
   let buf = Buffer.create 256 in
-  let cpu = (Os.boot ~io:(Os.buffer_io buf) img).cpu in
-  let outcome = Cpu.run ~fuel cpu in
-  (Buffer.contents buf, outcome, cpu)
+  let hart = (Os.boot ~io:(Os.buffer_io buf) img).hart in
+  let outcome = Hart.run ~fuel hart in
+  (Buffer.contents buf, outcome, hart)
 
 let run_source ?rvc ?fuel src = run_image ?fuel (assemble ?rvc src)
 
 let pp_outcome = function
-  | Cpu.Exited c -> Printf.sprintf "exit %d" c
-  | Cpu.Trapped { trap; pc } ->
+  | Hart.Exited c -> Printf.sprintf "exit %d" c
+  | Hart.Trapped { trap; pc } ->
       Format.asprintf "trap %a at 0x%Lx" Trap.pp trap pc
-  | Cpu.Out_of_fuel -> "out of fuel"
+  | Hart.Out_of_fuel -> "out of fuel"
 
 let encode_exn i =
   match Encode.encode i with
@@ -210,9 +210,9 @@ let prop_li =
     ~print:Int64.to_string int64_interesting (fun v ->
       let rd = Reg.of_int 10 in
       let seq = Assembler.li_sequence rd v in
-      let cpu = Cpu.create () in
-      List.iter (fun i -> Cpu.execute cpu i ~len:4 ~bits:0) seq;
-      List.length seq <= 8 && Cpu.get cpu rd = v)
+      let hart = Hart.create () in
+      List.iter (fun i -> Hart.execute hart i ~len:4 ~bits:0) seq;
+      List.length seq <= 8 && Hart.get hart rd = v)
 
 let pair64 = G.pair int64_interesting int64_interesting
 let print_pair (a, b) = Printf.sprintf "(%Ld, %Ld)" a b
@@ -220,16 +220,16 @@ let print_pair (a, b) = Printf.sprintf "(%Ld, %Ld)" a b
 let prop_mulh =
   T.make ~name:"mulh/mulhu/mulhsu match a 16-bit-limb reference" ~count
     ~print:print_pair pair64 (fun (a, b) ->
-      Cpu.alu Mulhu a b = mulh_ref ~a_signed:false ~b_signed:false a b
-      && Cpu.alu Mulh a b = mulh_ref ~a_signed:true ~b_signed:true a b
-      && Cpu.alu Mulhsu a b = mulh_ref ~a_signed:true ~b_signed:false a b
-      && Cpu.alu Mul a b = snd (mul128_ref a b))
+      Hart.alu Mulhu a b = mulh_ref ~a_signed:false ~b_signed:false a b
+      && Hart.alu Mulh a b = mulh_ref ~a_signed:true ~b_signed:true a b
+      && Hart.alu Mulhsu a b = mulh_ref ~a_signed:true ~b_signed:false a b
+      && Hart.alu Mul a b = snd (mul128_ref a b))
 
 let prop_div =
   T.make ~name:"div/rem: a = q*b + r with |r| < |b| and sign(r) = sign(a)"
     ~count ~print:print_pair pair64 (fun (a, b) ->
-      let q = Cpu.alu Div a b and r = Cpu.alu Rem a b in
-      let qu = Cpu.alu Divu a b and ru = Cpu.alu Remu a b in
+      let q = Hart.alu Div a b and r = Hart.alu Rem a b in
+      let qu = Hart.alu Divu a b and ru = Hart.alu Remu a b in
       let signed_ok =
         if b = 0L then q = -1L && r = a
         else if a = Int64.min_int && b = -1L then q = a && r = 0L
@@ -250,39 +250,39 @@ let prop_word_ops =
   T.make ~name:"*W ops match Int32 arithmetic" ~count ~print:print_pair pair64
     (fun (a, b) ->
       let sh = Int64.to_int b land 31 in
-      Cpu.alu Addw a b = w32 Int32.add a b
-      && Cpu.alu Subw a b = w32 Int32.sub a b
-      && Cpu.alu Mulw a b = w32 Int32.mul a b
-      && Cpu.alu Sllw a b = w32 (fun x _ -> Int32.shift_left x sh) a b
-      && Cpu.alu Srlw a b = w32 (fun x _ -> Int32.shift_right_logical x sh) a b
-      && Cpu.alu Sraw a b = w32 (fun x _ -> Int32.shift_right x sh) a b
+      Hart.alu Addw a b = w32 Int32.add a b
+      && Hart.alu Subw a b = w32 Int32.sub a b
+      && Hart.alu Mulw a b = w32 Int32.mul a b
+      && Hart.alu Sllw a b = w32 (fun x _ -> Int32.shift_left x sh) a b
+      && Hart.alu Srlw a b = w32 (fun x _ -> Int32.shift_right_logical x sh) a b
+      && Hart.alu Sraw a b = w32 (fun x _ -> Int32.shift_right x sh) a b
       && (Int64.to_int32 b = 0l
          || (Int64.to_int32 a = Int32.min_int && Int64.to_int32 b = -1l)
-         || Cpu.alu Divw a b = w32 Int32.div a b
-            && Cpu.alu Remw a b = w32 Int32.rem a b))
+         || Hart.alu Divw a b = w32 Int32.div a b
+            && Hart.alu Remw a b = w32 Int32.rem a b))
 
 let prop_zbb =
   T.make ~name:"Zbb/Zbs ops match naive references" ~count ~print:print_pair
     pair64 (fun (a, b) ->
       let n = Int64.to_int b land 63 in
       let bit = Int64.shift_left 1L n in
-      Cpu.unary Clz a = Int64.of_int (clz_ref a)
-      && Cpu.unary Cpop a = Int64.of_int (cpop_ref a)
-      && Cpu.unary Ctz a
+      Hart.unary Clz a = Int64.of_int (clz_ref a)
+      && Hart.unary Cpop a = Int64.of_int (cpop_ref a)
+      && Hart.unary Ctz a
          = Int64.of_int
              (if a = 0L then 64 else 63 - clz_ref (Int64.logand a (Int64.neg a)))
-      && Cpu.alu Ror (Cpu.alu Rol a b) b = a
-      && Cpu.alu Rol a b
+      && Hart.alu Ror (Hart.alu Rol a b) b = a
+      && Hart.alu Rol a b
          = Int64.logor (Int64.shift_left a n)
              (if n = 0 then 0L else Int64.shift_right_logical a (64 - n))
-      && Cpu.unary Rev8 (Cpu.unary Rev8 a) = a
-      && Cpu.alu Bset a b = Int64.logor a bit
-      && Cpu.alu Bclr a b = Int64.logand a (Int64.lognot bit)
-      && Cpu.alu Binv a b = Int64.logxor a bit
-      && (Cpu.alu Bext a b = if Int64.logand a bit = 0L then 0L else 1L)
-      && Cpu.alu Sh2add a b = Int64.add (Int64.mul a 4L) b
-      && (Cpu.alu Max a b = if Int64.compare a b >= 0 then a else b)
-      && Cpu.alu Minu a b = if Int64.unsigned_compare a b <= 0 then a else b)
+      && Hart.unary Rev8 (Hart.unary Rev8 a) = a
+      && Hart.alu Bset a b = Int64.logor a bit
+      && Hart.alu Bclr a b = Int64.logand a (Int64.lognot bit)
+      && Hart.alu Binv a b = Int64.logxor a bit
+      && (Hart.alu Bext a b = if Int64.logand a bit = 0L then 0L else 1L)
+      && Hart.alu Sh2add a b = Int64.add (Int64.mul a 4L) b
+      && (Hart.alu Max a b = if Int64.compare a b >= 0 then a else b)
+      && Hart.alu Minu a b = if Int64.unsigned_compare a b <= 0 then a else b)
 
 let prop_memory =
   let addr =
@@ -380,15 +380,15 @@ let prop_fpu_fast_paths =
 
 (* Everything a trapping instruction must leave unchanged. All-zero pages
    are dropped: allocating one isn't visible. *)
-let arch_state (cpu : Cpu.t) =
+let arch_state (hart : Hart.t) =
   let sorted tbl f =
     List.sort compare (Hashtbl.fold (fun k v acc -> f k v @ acc) tbl [])
   in
   let zero_page = Bytes.make Memory.page_size '\000' in
-  ( (Bytes.copy cpu.x, Bytes.copy cpu.f, Cpu.pc cpu, cpu.instret),
-    (cpu.fflags, cpu.frm, cpu.reservation),
-    sorted cpu.mcsrs (fun k v -> [ (k, v) ]),
-    sorted cpu.mem.pages (fun n (p : Memory.page) ->
+  ( (Bytes.copy hart.x, Bytes.copy hart.f, Hart.pc hart, hart.instret),
+    (hart.fflags, hart.frm, hart.reservation),
+    sorted hart.mcsrs (fun k v -> [ (k, v) ]),
+    sorted hart.mem.pages (fun n (p : Memory.page) ->
         if Bytes.equal p.bytes zero_page then [] else [ (n, Bytes.copy p.bytes) ]) )
 
 let prop_precise_traps =
@@ -406,17 +406,17 @@ let prop_precise_traps =
   T.make ~name:"a trapping instruction changes no architectural state" ~count:5000
     ~print:(fun (i, _, _, frm, _) -> Printf.sprintf "%s (frm=%d)" (Instr.to_string i) frm)
     gen (fun (i, regs, fregs, frm, reserved) ->
-      let cpu = Cpu.create () in
-      Array.iteri (Cpu.set_x cpu) regs;
-      Array.iteri (Cpu.set_f cpu) fregs;
-      Cpu.set_pc cpu 0x10000L;
-      cpu.frm <- frm;
-      if reserved then cpu.reservation <- Some (Cpu.get_x cpu 10);
-      Memory.store cpu.mem 0x20000L 8 0x1122334455667788L;
-      let before = arch_state cpu in
-      match Cpu.execute cpu i ~len:4 ~bits:(encode_exn i) with
+      let hart = Hart.create () in
+      Array.iteri (Hart.set_x hart) regs;
+      Array.iteri (Hart.set_f hart) fregs;
+      Hart.set_pc hart 0x10000L;
+      hart.frm <- frm;
+      if reserved then hart.reservation <- Some (Hart.get_x hart 10);
+      Memory.store hart.mem 0x20000L 8 0x1122334455667788L;
+      let before = arch_state hart in
+      match Hart.execute hart i ~len:4 ~bits:(encode_exn i) with
       | () -> true
-      | exception Trap.Trap _ -> arch_state cpu = before)
+      | exception Trap.Trap _ -> arch_state hart = before)
   [@@ocamlformat "disable"]
 
 let prop_fma_exact =
@@ -555,8 +555,8 @@ let prop_rvc_programs =
         ^ "\nli a7, 93\necall\n"
       in
       let regs rvc =
-        let _, outcome, cpu = run_source ~rvc src in
-        (outcome, List.init 32 (Cpu.get_x cpu))
+        let _, outcome, hart = run_source ~rvc src in
+        (outcome, List.init 32 (Hart.get_x hart))
       in
       regs false = regs true)
 
@@ -645,7 +645,7 @@ let test_examples () =
             expected out;
           check_eq ~pp:pp_outcome
             (Printf.sprintf "%s [%s] exit" f mode)
-            (Cpu.Exited 0) outcome)
+            (Hart.Exited 0) outcome)
         [
           ("plain", assemble src);
           ("rvc", assemble ~rvc:true src);
@@ -700,7 +700,7 @@ let test_decode_cache () =
   in
   let exit_code src =
     match run_source src with
-    | _, Cpu.Exited c, _ -> c
+    | _, Hart.Exited c, _ -> c
     | _, o, _ -> failwith (pp_outcome o)
   in
   check_eq ~pp:string_of_int "store over an executed instruction in .text" 6
@@ -745,35 +745,35 @@ let test_decode_cache () =
 let test_semantics () =
   section "semantics";
   let regs_after src =
-    let _, _, cpu = run_source src in
-    cpu
+    let _, _, hart = run_source src in
+    hart
   in
-  let cpu =
+  let hart =
     regs_after "li t0, 5\naddi zero, t0, 1\nmv a0, zero\nli a7, 93\necall"
   in
-  check "x0 is hard-wired to zero" ((Cpu.get_x cpu 0) = 0L);
+  check "x0 is hard-wired to zero" ((Hart.get_x hart 0) = 0L);
   let _, outcome, _ = run_source ".word 0" in
   check "all-zero word is an illegal instruction"
     (match outcome with
-    | Cpu.Trapped { trap = { cause = Illegal_instruction; tval = 0L }; pc = 0x10000L } -> true
+    | Hart.Trapped { trap = { cause = Illegal_instruction; tval = 0L }; pc = 0x10000L } -> true
     | _ -> false);
   let _, outcome, _ = run_source "ebreak" in
   check "ebreak traps"
     (match outcome with
-    | Cpu.Trapped { trap = { cause = Breakpoint; tval = 0x10000L }; _ } -> true
+    | Hart.Trapped { trap = { cause = Breakpoint; tval = 0x10000L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "li a0, 0x20001\namoadd.w a1, a1, (a0)" in
   check "misaligned AMO traps"
     (match outcome with
-    | Cpu.Trapped { trap = { cause = Store_address_misaligned; tval = 0x20001L }; _ } -> true
+    | Hart.Trapped { trap = { cause = Store_address_misaligned; tval = 0x20001L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "csrr a0, 0x7c0" in
   check "unknown CSR traps"
     (match outcome with
-    | Cpu.Trapped { trap = { cause = Illegal_instruction; tval = 0x7c002573L }; _ } -> true
+    | Hart.Trapped { trap = { cause = Illegal_instruction; tval = 0x7c002573L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "loop: j loop" ~fuel:1000 in
-  check "fuel limit" (outcome = Cpu.Out_of_fuel);
+  check "fuel limit" (outcome = Hart.Out_of_fuel);
   let htif =
     Os.boot
       ~io:(Os.buffer_io (Buffer.create 16))
@@ -786,8 +786,8 @@ let test_semantics () =
           tohost: .dword 0")
   in
   check "HTIF tohost write (3 << 1 | 1) exits with status 3"
-    (Os.run ~fuel:100_000 htif = Cpu.Exited 3);
-  let cpu =
+    (Os.run ~fuel:100_000 htif = Hart.Exited 3);
+  let hart =
     regs_after
       "li t0, 3\n\
        fcvt.s.w ft0, t0\n\
@@ -800,11 +800,11 @@ let test_semantics () =
        ecall"
   in
   check "singles are NaN-boxed in FP registers"
-    (Int64.shift_right_logical (Cpu.get_x cpu 10) 32 = 0xffffffffL);
-  check "fmv.x.w sign-extends the raw bits" ((Cpu.get_x cpu 11) = 0x40400000L);
+    (Int64.shift_right_logical (Hart.get_x hart 10) 32 = 0xffffffffL);
+  check "fmv.x.w sign-extends the raw bits" ((Hart.get_x hart 11) = 0x40400000L);
   check "unboxed single operand reads as canonical NaN"
-    ((Cpu.get_x cpu 12) = 0x7fc00000L);
-  let cpu =
+    ((Hart.get_x hart 12) = 0x7fc00000L);
+  let hart =
     regs_after
       "li t0, 2\n\
        fsrm t0\n\
@@ -819,7 +819,7 @@ let test_semantics () =
        ecall"
   in
   check "dynamic rounding mode from frm (rdn: 3.5 -> 3)"
-    ((Cpu.get_x cpu 10) = 3L && (Cpu.get_x cpu 11) = 2L);
+    ((Hart.get_x hart 10) = 3L && (Hart.get_x hart 11) = 2L);
   let out, _, _ =
     run_source
       "li a0, 1\n\

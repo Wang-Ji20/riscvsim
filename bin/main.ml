@@ -22,24 +22,24 @@ let load_image ~rvc path =
                   Printf.sprintf "%s:%d: error: %s" path line msg)
                 errs))
 
-let dump_regs (cpu : Cpu.t) =
+let dump_regs (hart : Hart.t) =
   let open Printf in
-  eprintf "pc = 0x%016Lx  instret = %d\n" (Cpu.pc cpu) cpu.instret;
+  eprintf "pc = 0x%016Lx  instret = %d\n" (Hart.pc hart) hart.instret;
   for r = 0 to 31 do
     eprintf "%-4s = 0x%016Lx%s"
       (Reg.abi_name (Reg.of_int r))
-      (Cpu.get_x cpu r)
+      (Hart.get_x hart r)
       (if r mod 4 = 3 then "\n" else "  ")
   done;
   for r = 0 to 31 do
-    let v = Cpu.get_f cpu r in
+    let v = Hart.get_f hart r in
     if v <> 0L then
       eprintf "%-4s = 0x%016Lx (%s)\n"
         (Freg.abi_name (Freg.of_int r))
         v
         (Fpu.string_of_double (Int64.float_of_bits v))
   done;
-  if cpu.fflags <> 0 then eprintf "fflags = 0x%02x\n" cpu.fflags
+  if hart.fflags <> 0 then eprintf "fflags = 0x%02x\n" hart.fflags
 
 (** Combine the optional per-instruction hooks into one. *)
 let combine_hooks hooks =
@@ -61,7 +61,7 @@ let run path args rvc trace regs fuel strace signature stats profile =
           ?strace:(if strace then Some prerr_string else None)
           img
       in
-      let cpu = os.cpu in
+      let hart = os.hart in
       let trace =
         if trace then
           Some
@@ -72,15 +72,15 @@ let run path args rvc trace regs fuel strace signature stats profile =
       in
       let prof = if profile then Some (Stats.create_profile ()) else None in
       let hook = combine_hooks [ trace; Option.map Stats.record prof ] in
-      let before = Stats.sample cpu.instret in
+      let before = Stats.sample hart.instret in
       let outcome = Os.run ?fuel ?trace:hook os in
-      let summary = Stats.diff before (Stats.sample cpu.instret) in
+      let summary = Stats.diff before (Stats.sample hart.instret) in
       if stats then Format.eprintf "%a%!" Stats.pp_summary summary;
       Option.iter (Format.eprintf "%a%!" (Stats.pp_profile ?top:None)) prof;
-      if regs then dump_regs cpu;
+      if regs then dump_regs hart;
       Option.iter
         (fun file ->
-          match Os.signature cpu img with
+          match Os.signature hart img with
           | Some s ->
               Out_channel.with_open_bin file (fun oc -> output_string oc s)
           | None ->
@@ -90,11 +90,11 @@ let run path args rvc trace regs fuel strace signature stats profile =
       | Exited code -> code
       | Trapped { trap; pc } ->
           Format.eprintf "riscvsim: %a at pc 0x%Lx@." Trap.pp trap pc;
-          if not regs then dump_regs cpu;
+          if not regs then dump_regs hart;
           134
       | Out_of_fuel ->
           Printf.eprintf "riscvsim: instruction limit reached (%d executed)\n"
-            cpu.instret;
+            hart.instret;
           124)
 
 let asm path rvc output listing =

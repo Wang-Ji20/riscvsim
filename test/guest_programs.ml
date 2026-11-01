@@ -65,15 +65,15 @@ let run_sim exe =
       let cwd = Sys.getcwd () in
       Sys.chdir scratch;
       let os = Os.boot ~io:(Os.buffer_io buf) ~argv:(exe :: args) ~env image in
-      let outcome = Cpu.run ~fuel:2_000_000_000 os.cpu in
+      let outcome = Hart.run ~fuel:2_000_000_000 os.hart in
       Sys.chdir cwd;
       match outcome with
-      | Cpu.Exited c -> (Buffer.contents buf, c)
-      | Cpu.Trapped { trap; pc } ->
+      | Hart.Exited c -> (Buffer.contents buf, c)
+      | Hart.Trapped { trap; pc } ->
           ( Buffer.contents buf
             ^ Format.asprintf "\n<trap: %a at 0x%Lx>" Trap.pp trap pc,
             -1 )
-      | Cpu.Out_of_fuel -> (Buffer.contents buf ^ "\n<out of fuel>", -1))
+      | Hart.Out_of_fuel -> (Buffer.contents buf ^ "\n<out of fuel>", -1))
 
 let test_program name =
   let src = Filename.concat guest_dir ("tests/" ^ name ^ ".c") in

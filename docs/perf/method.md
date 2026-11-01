@@ -70,7 +70,7 @@ CSV for tools and as a Markdown table for people.
 
 **Build in release mode.** In its default (dev) profile, dune compiles
 with `-opaque`, which turns off inlining across modules, for example of
-`Memory.page_no` into `Cpu`. That changes the numbers a lot, so
+`Memory.page_no` into `Hart`. That changes the numbers a lot, so
 benchmarks always use `--profile release`.
 
 To keep measurements stable: close other heavy programs, use a fixed CPU

@@ -30,12 +30,12 @@ let sim_run bytecode =
       let buf = Buffer.create 4096 in
       let argv = "ocamlrun" :: bytecode :: args in
       let os = Os.boot ~io:(Os.buffer_io buf) ~argv ~exe:ocamlrun_riscv image in
-      match Cpu.run ~fuel:5_000_000_000 os.cpu with
-      | Cpu.Exited c -> (Buffer.contents buf, c)
-      | Cpu.Trapped { trap; pc } ->
+      match Hart.run ~fuel:5_000_000_000 os.hart with
+      | Hart.Exited c -> (Buffer.contents buf, c)
+      | Hart.Trapped { trap; pc } ->
           ( Buffer.contents buf ^ Format.asprintf "<%a at 0x%Lx>" Trap.pp trap pc,
             -1 )
-      | Cpu.Out_of_fuel -> (Buffer.contents buf ^ "<out of fuel>", -1))
+      | Hart.Out_of_fuel -> (Buffer.contents buf ^ "<out of fuel>", -1))
 
 let check program =
   let src = Filename.concat guest_dir (program ^ ".ml") in

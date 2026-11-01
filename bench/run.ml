@@ -61,16 +61,16 @@ let peak_kb () =
 let run_here (img : Image.t) =
   let buf = Buffer.create 256 in
   let os = Os.boot ~io:(Os.buffer_io buf) ~argv:[ "bench" ] img in
-  let before = Stats.sample os.cpu.instret in
+  let before = Stats.sample os.hart.instret in
   let outcome = Os.run os in
-  let summary = Stats.diff before (Stats.sample os.cpu.instret) in
+  let summary = Stats.diff before (Stats.sample os.hart.instret) in
   let output =
     match outcome with
-    | Cpu.Exited _ -> Buffer.contents buf
-    | Cpu.Trapped { trap; pc } ->
+    | Hart.Exited _ -> Buffer.contents buf
+    | Hart.Trapped { trap; pc } ->
         Format.asprintf "%s<trap: %a at 0x%Lx>" (Buffer.contents buf) Trap.pp
           trap pc
-    | Cpu.Out_of_fuel -> Buffer.contents buf ^ "<out of fuel>"
+    | Hart.Out_of_fuel -> Buffer.contents buf ^ "<out of fuel>"
   in
   { summary; peak_kb = peak_kb (); output }
 

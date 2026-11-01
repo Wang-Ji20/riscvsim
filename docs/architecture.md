@@ -36,7 +36,7 @@ program's requests (system calls).
                                          |
                                          v
        +--------------------------------------------------------------+
-       |  Cpu: fetch -> decode -> execute, registers, CSRs, atomics   |
+       |  Hart: fetch -> decode -> execute, registers, CSRs, atomics  |
        |                                                              |
        |   Decode / Compressed    Fpu (IEEE 754)      Memory (pages)  |
        +--------------------------------------------------------------+
@@ -57,9 +57,10 @@ The parts, from the bottom up:
   cause codes. The CPU raises them as an OCaml exception.
 - **`Fpu`** computes floating-point results exactly as the IEEE 754
   standard requires, including all rounding modes and exception flags.
-- **`Cpu`** holds the processor state (32 integer registers, 32 FP
-  registers, the program counter, a few control registers) and executes
-  instructions. When the program executes `ecall`, the CPU hands control
+- **`Hart`** (*hardware thread*, one processor core) holds the processor
+  state (32 integer registers, 32 FP registers, the program counter, a
+  few control registers) and executes instructions. When the program
+  executes `ecall`, the hart hands control
   to whatever environment is attached.
 - **`Os`** is that environment: a Linux process. It builds the initial
   stack (arguments, environment), keeps a table of open files backed by
@@ -86,7 +87,7 @@ Take `riscvsim run hello.s`:
    everything goes and records label addresses; the second fills in
    addresses and encodes each instruction into bits. The result is an
    `Image`.
-3. **Load.** `Os.boot` creates a `Cpu`, copies the image's segments into
+3. **Load.** `Os.boot` creates a `Hart`, copies the image's segments into
    `Memory`, builds the stack with argc, argv, the environment and the
    *auxiliary vector*, and points the program counter at the entry
    address.

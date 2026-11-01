@@ -196,7 +196,7 @@ docs/perf targets say Phases 1-5 need far less).
 
 - [x] 1a. Typed traps (`Trap`): RISC-V cause codes and tval; property test
       that a trapping instruction changes no architectural state
-- [ ] 1b. Rename `Cpu` to `Hart`
+- [x] 1b. Rename `Cpu` to `Hart`
 - [ ] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
       stores
 - [ ] 1d. `Machine`: harts, bus, devices, virtual clock

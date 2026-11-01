@@ -44,7 +44,7 @@ let buffer_io ?(input = "") buf =
 type file = Stdin | Stdout | Stderr | Host of Unix.file_descr
 
 type t = {
-  cpu : Cpu.t;
+  hart : Hart.t;
   io : io;
   fds : (int, file) Hashtbl.t;
   brk_start : int64;
@@ -132,8 +132,8 @@ let hwcap =
             auxv (key, value) pairs, AT_NULL
             ... 16 random bytes, argument and environment strings
     v} *)
-let setup_stack (cpu : Cpu.t) (img : Image.t) ~argv ~env =
-  let mem = cpu.mem in
+let setup_stack (hart : Hart.t) (img : Image.t) ~argv ~env =
+  let mem = hart.mem in
   let top = ref stack_top in
   let push_bytes s =
     top := Int64.sub !top (Int64.of_int (String.length s));
@@ -168,15 +168,15 @@ let setup_stack (cpu : Cpu.t) (img : Image.t) ~argv ~env =
   List.iteri
     (fun k w -> Memory.store mem (Int64.add sp (Int64.of_int (8 * k))) 8 w)
     words;
-  Cpu.set cpu Reg.sp sp
+  Hart.set hart Reg.sp sp
 
 (* {1 Guest memory helpers} *)
 
-let read_string t addr = Memory.read_cstring t.cpu.mem addr
-let read_bytes t addr len = Memory.read_bytes t.cpu.mem addr len
-let write_bytes t addr b = Memory.blit_bytes t.cpu.mem addr b
-let write_u64 t addr v = Memory.store t.cpu.mem addr 8 v
-let write_u32 t addr v = Memory.store t.cpu.mem addr 4 (Int64.of_int v)
+let read_string t addr = Memory.read_cstring t.hart.mem addr
+let read_bytes t addr len = Memory.read_bytes t.hart.mem addr len
+let write_bytes t addr b = Memory.blit_bytes t.hart.mem addr b
+let write_u64 t addr v = Memory.store t.hart.mem addr 8 v
+let write_u32 t addr v = Memory.store t.hart.mem addr 4 (Int64.of_int v)
 let zero t addr len = write_bytes t addr (Bytes.make len '\000')
 
 (** Drop whole pages in [addr, addr+len): they read as zero again. *)
@@ -185,7 +185,7 @@ let unmap t addr len =
   let last = Int64.shift_right_logical (Int64.add addr (Int64.of_int len)) 12 in
   let rec go p =
     if Int64.compare p last < 0 then (
-      Memory.unmap_page t.cpu.mem (Int64.to_int p);
+      Memory.unmap_page t.hart.mem (Int64.to_int p);
       go (Int64.succ p))
   in
   go first
@@ -297,8 +297,8 @@ let do_write t fd data =
 let iovecs t iov cnt =
   List.init cnt (fun k ->
       let e = Int64.add iov (Int64.of_int (16 * k)) in
-      ( Memory.load t.cpu.mem e 8,
-        Int64.to_int (Memory.load t.cpu.mem (Int64.add e 8L) 8) ))
+      ( Memory.load t.hart.mem e 8,
+        Int64.to_int (Memory.load t.hart.mem (Int64.add e 8L) 8) ))
 
 let utsname =
   [ "Linux"; "riscvsim"; "6.6.0-riscvsim"; "#1 SMP"; "riscv64"; "(none)" ]
@@ -477,13 +477,13 @@ let sys_fstat t a =
 (* {2 Process} *)
 
 let sys_exit t a =
-  t.cpu.exit_code <- Some (int_arg a 0 land 0xff);
+  t.hart.exit_code <- Some (int_arg a 0 land 0xff);
   0L
 
 let sys_kill t a ~signal_arg =
   let signal = int_arg a signal_arg in
   t.io.err (Printf.sprintf "riscvsim: program killed by signal %d\n" signal);
-  t.cpu.exit_code <- Some (128 + signal);
+  t.hart.exit_code <- Some (128 + signal);
   0L
 
 (** No signal is ever delivered, so report empty previous state. *)
@@ -497,7 +497,7 @@ let sys_futex _ a =
 
 let sys_sched_getaffinity t a =
   zero t (a 2) (max 8 (min (int_arg a 1) 128));
-  Memory.store t.cpu.mem (a 2) 1 1L (* one CPU *);
+  Memory.store t.hart.mem (a 2) 1 1L (* one CPU *);
   8L
 
 let sys_uname t a =
@@ -537,7 +537,7 @@ let sys_gettimeofday t a =
 
 let sys_times t a =
   if a 0 <> 0L then zero t (a 0) 32;
-  Int64.of_int t.cpu.instret
+  Int64.of_int t.hart.instret
 
 (* {2 Memory} *)
 
@@ -599,10 +599,10 @@ let print t s (a : args) =
 
 let debug_calls : (int * (string * (t -> args -> int64))) list =
   [ (1, ("print_int", fun t a -> print t (Int64.to_string (a 0)) a));
-    (2, ("print_float", fun t a -> print t (Fpu.string_of_single (Cpu.get_s t.cpu (Freg.of_int 10))) a));
-    (3, ("print_double", fun t a -> print t (Fpu.string_of_double (Int64.float_of_bits (Cpu.get_f t.cpu 10))) a));
+    (2, ("print_float", fun t a -> print t (Fpu.string_of_single (Hart.get_s t.hart (Freg.of_int 10))) a));
+    (3, ("print_double", fun t a -> print t (Fpu.string_of_double (Int64.float_of_bits (Hart.get_f t.hart 10))) a));
     (4, ("print_string", fun t a -> print t (read_string t (a 0)) a));
-    (10, ("exit", fun t _ -> t.cpu.exit_code <- Some 0; 0L));
+    (10, ("exit", fun t _ -> t.hart.exit_code <- Some 0; 0L));
     (11, ("print_char", fun t a -> print t (String.make 1 (Char.chr (int_arg a 0 land 0xff))) a));
     (34, ("print_hex", fun t a -> print t (Printf.sprintf "0x%016Lx" (a 0)) a));
     (36, ("print_unsigned", fun t a -> print t (Printf.sprintf "%Lu" (a 0)) a)) ]
@@ -661,9 +661,9 @@ let lookup t num =
   match debug with Some h -> Some h | None -> Hashtbl.find_opt linux_table num
 
 let syscall t =
-  let cpu = t.cpu in
-  let a n = Cpu.get_x cpu (10 + n) in
-  let num = Int64.to_int (Cpu.get_x cpu 17) in
+  let hart = t.hart in
+  let a n = Hart.get_x hart (10 + n) in
+  let num = Int64.to_int (Hart.get_x hart 17) in
   let name, result =
     match lookup t num with
     | None -> (Printf.sprintf "syscall_%d" num, i64 (-enosys))
@@ -679,14 +679,14 @@ let syscall t =
         (Printf.sprintf "%s(0x%Lx, 0x%Lx, 0x%Lx) = %Ld\n" name (a 0) (a 1) (a 2)
            result))
     t.strace;
-  if cpu.exit_code = None then Cpu.set_x cpu 10 result
+  if hart.exit_code = None then Hart.set_x hart 10 result
 
 (** Create a CPU running [img] as a Linux process. *)
 let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     (img : Image.t) =
-  let cpu = Cpu.create () in
-  Cpu.load cpu img;
-  setup_stack cpu img ~argv ~env;
+  let hart = Hart.create () in
+  Hart.load hart img;
+  setup_stack hart img ~argv ~env;
   let brk = page_align (Image.end_address img) in
   let fds = Hashtbl.create 8 in
   List.iter
@@ -694,7 +694,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     [ (0, Stdin); (1, Stdout); (2, Stderr) ];
   let t =
     {
-      cpu;
+      hart;
       io;
       fds;
       brk_start = brk;
@@ -708,7 +708,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
       tohost = List.assoc_opt "tohost" img.symbols;
     }
   in
-  cpu.ecall <- (fun _ -> syscall t);
+  hart.ecall <- (fun _ -> syscall t);
   t
 
 (* {1 Running} *)
@@ -717,30 +717,30 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     storing [(code lsl 1) lor 1] to the [tohost] symbol. *)
 let htif_exit t =
   Option.bind t.tohost (fun addr ->
-      let v = Memory.load t.cpu.mem addr 8 in
+      let v = Memory.load t.hart.mem addr 8 in
       if Int64.logand v 1L = 1L then
         Some (Int64.to_int (Int64.shift_right_logical v 1) land 0xff)
       else None)
 
-(** Like {!Cpu.run}, but also honours HTIF exits. Like Spike, it polls [tohost]
+(** Like {!Hart.run}, but also honours HTIF exits. Like Spike, it polls [tohost]
     between slices of instructions rather than on every store. *)
 let run ?(fuel = max_int) ?trace t =
   let slice = 10_000 in
   let rec loop remaining =
-    match Cpu.run ~fuel:(min slice remaining) ?trace t.cpu with
-    | Cpu.Out_of_fuel -> (
+    match Hart.run ~fuel:(min slice remaining) ?trace t.hart with
+    | Hart.Out_of_fuel -> (
         match htif_exit t with
-        | Some code -> Cpu.Exited code
+        | Some code -> Hart.Exited code
         | None ->
             if remaining > slice then loop (remaining - slice)
-            else Cpu.Out_of_fuel)
+            else Hart.Out_of_fuel)
     | outcome -> outcome
   in
-  if t.tohost = None then Cpu.run ~fuel ?trace t.cpu else loop fuel
+  if t.tohost = None then Hart.run ~fuel ?trace t.hart else loop fuel
 
 (** The words between [begin_signature] and [end_signature], one per line as 8
     hex digits: the riscv-arch-test signature format. *)
-let signature (cpu : Cpu.t) (img : Image.t) =
+let signature (hart : Hart.t) (img : Image.t) =
   match
     ( List.assoc_opt "begin_signature" img.symbols,
       List.assoc_opt "end_signature" img.symbols )
@@ -750,7 +750,7 @@ let signature (cpu : Cpu.t) (img : Image.t) =
       let rec go a =
         if Int64.compare a e < 0 then (
           Buffer.add_string buf
-            (Printf.sprintf "%08Lx\n" (Memory.load cpu.mem a 4));
+            (Printf.sprintf "%08Lx\n" (Memory.load hart.mem a 4));
           go (Int64.add a 4L))
       in
       go b;
