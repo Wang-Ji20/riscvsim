@@ -189,14 +189,14 @@ see [its design document](design/rvlibc.md) for the build command.
 OCaml's bytecode interpreter can be cross-compiled once:
 
 ```
-guest/ocamlrun/build.sh PATH/TO/ocaml-5.4.1-source /tmp/ocamlrun.rv
+guest/ocamlrun/build.sh PATH/TO/ocaml-5.4.1-source ../riscv-deps/ocamlrun.rv
 ```
 
 Then compile a program on your machine and run its bytecode on riscvsim:
 
 ```
 $ ocamlc -o hello.byte hello.ml
-$ riscvsim run /tmp/ocamlrun.rv hello.byte
+$ riscvsim run ../riscv-deps/ocamlrun.rv hello.byte
 ```
 
 The OCaml source must be the same version as your `ocamlc`.
@@ -208,7 +208,7 @@ The OCaml source must be the same version as your `ocamlc`.
 | `dune test` | unit and property tests; the clang encoding check; C programs on rvlibc and glibc vs your machine | clang and the cross compiler are optional |
 | `dune build @conformance` | the official riscv-tests and riscv-arch-test suites | cross compiler; suites in `../riscv-deps/` |
 | `dune build @spike` | random programs compared against Spike | cross compiler; Spike |
-| `dune build @ocaml` | OCaml bytecode compared against your machine | a built `/tmp/ocamlrun.rv` |
+| `dune build @ocaml` | OCaml bytecode compared against your machine | a built `../riscv-deps/ocamlrun.rv` |
 
 `dune build --profile release @bench` runs the benchmarks and prints
 their speed (see [the performance method](perf/method.md)). The release

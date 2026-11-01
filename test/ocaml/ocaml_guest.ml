@@ -4,14 +4,19 @@
    run twice: by the host's ocamlrun, and by a riscv64 ocamlrun (built with
    guest/ocamlrun/build.sh) running on riscvsim. Output and exit status must
    match exactly. The riscv64 binary is taken from $OCAMLRUN_RISCV (default
-   /tmp/ocamlrun.rv); if it's missing, the test skips. *)
+   ../riscv-deps/ocamlrun.rv, next to the repository); if it's missing, the
+   test skips. *)
 
 open Riscv
 
 let guest_dir = "../../guest/ocaml"
 
 let ocamlrun_riscv =
-  Option.value (Sys.getenv_opt "OCAMLRUN_RISCV") ~default:"/tmp/ocamlrun.rv"
+  (* dune runs us in _build/default/test/ocaml *)
+  Option.value
+    (Sys.getenv_opt "OCAMLRUN_RISCV")
+    ~default:
+      (Filename.concat (Sys.getcwd ()) "../../../../../riscv-deps/ocamlrun.rv")
 
 let args = [ "a"; "b c" ]
 let read_file path = In_channel.with_open_bin path In_channel.input_all
