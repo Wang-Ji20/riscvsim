@@ -71,6 +71,30 @@ These tricks fail if an intermediate value becomes too small (a
 *subnormal* number) or too large. So operands are first scaled by a power
 of two into a safe range; scaling by a power of two is exact.
 
+## The fast path
+
+Expansions are lists, so they're slow. Usually they aren't needed: when
+every value involved lies between 2^-900 and 2^900, far from both ends
+of the double range, a single fused multiply-add gives the error
+exactly:
+
+| Operation | Exact error from one FMA | Sign of (exact − rounded) |
+|---|---|---|
+| `r = a × b` | `a × b − r` | its sign |
+| `r = a / b` | `a − r × b` | its sign, times the sign of `b` |
+| `r = √a` | `a − r × r` | its sign |
+
+`Fpu.mul`, `div` and `sqrt` take this path when the values are in that
+range, and fall back to `mul_exact`, `div_exact` and `sqrt_exact`
+otherwise. A square root is never exactly halfway between two doubles,
+so its fast path never reports a tie. A property test runs both paths on
+20,000 inputs clustered around the range limits and requires identical
+answers. Widening the range to 2^-1060 makes it fail within a few
+hundred cases.
+
+FMA itself checks its common case (no tiny or huge intermediates)
+before doing any scaling.
+
 ## Single precision
 
 32-bit floats are computed using 64-bit arithmetic. Rounding twice (first
@@ -120,6 +144,9 @@ infinity and the largest finite number for each mode.
 ## Trade-offs
 
 This approach is pure OCaml and needs no C code, but it costs many
-operations per floating-point instruction. The
-[optimization plan](../perf/plan.md) (step O8) adds a fast path for the
-common case: exact results in round-to-nearest.
+operations per floating-point instruction. The fast path cut the cost
+of the `fp` benchmark by about 3×, but floating-point code still runs
+about 4× slower than integer code. Most of what remains is glue
+(closures per format, tuples for result and flags), not arithmetic. Reading
+the host CPU's exception flags through a C binding would be faster
+still, at the price of C code and host-specific behaviour.

@@ -26,16 +26,17 @@ measurements as we reach each one:
 | Boot a full distribution (Debian) | about 10¹⁰ |
 | Build the OCaml compiler inside the guest | about 10¹² |
 
-At the measured **6 MIPS** of today's interpreter:
+At the **6 MIPS** of the first interpreter, and at the **about 55 MIPS**
+reached on 2026-11-01 (decode cache, unboxed registers, FP fast path):
 
-| Workload | Time at 6 MIPS |
-|----------|----------------|
-| OCaml stress test | 65 s |
-| Minimal Linux boot | about 1.5 min |
-| Debian boot | about 28 min |
-| OCaml build in the guest | about 2 days |
+| Workload | At 6 MIPS | At 55 MIPS |
+|----------|-----------|------------|
+| OCaml stress test (measured) | 65 s | 12 s |
+| Minimal Linux boot | about 1.5 min | about 10 s |
+| Debian boot | about 28 min | about 3 min |
+| OCaml build in the guest | about 2 days | about 5 h |
 
-The first two are fine for development. A half-hour boot makes a
+At 6 MIPS the first two were fine for development. A half-hour boot makes a
 distribution painful to work with, and a two-day compiler build makes
 Phases 9 and 10 of the roadmap impractical.
 

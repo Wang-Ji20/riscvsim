@@ -137,7 +137,40 @@ let negate_all = List.map Float.neg
 
 let all_finite = List.for_all Float.is_finite
 
-let mul a b =
+(* {2 Fast paths}
+
+   Far from underflow and overflow, the error of a product, quotient or root
+   is computed exactly by one FMA, so no expansions are needed:
+     a*b - r      (Dekker's TwoProduct)
+     a - r*b      (the division remainder)
+     a - r*r      (the square-root remainder)
+   are exact when every value involved lies in [2^-900, 2^900], far inside the
+   normal range of binary64 ([2^-1022, 2^1024)). The exact versions below
+   handle everything else, and a property test checks that both agree. *)
+
+let in_fast_range x =
+  let m = Float.abs x in
+  m >= 0x1p-900 && m <= 0x1p900
+
+let approx_of_sign r ~err ~tie =
+  if err = 0 then exact r else { r; err; tie; scale = 0 }
+
+let mul_fast a b r = make_approx r (Float.fma a b (-.r))
+
+(* a/b - r = rem/b. There's a tie iff |rem/b| is half the gap to the
+   neighbour, which is a power of two, so the product below is exact. *)
+let div_fast a b r =
+  let rem = Float.fma (-.r) b a in
+  let err = sign rem * sign b in
+  approx_of_sign r ~err
+    ~tie:(2. *. Float.abs rem = Float.abs ((step r err -. r) *. b))
+
+(* sqrt a - r has the sign of a - r^2. A square root is never exactly halfway
+   between two floats, so there is no tie. *)
+let sqrt_fast a r =
+  approx_of_sign r ~err:(sign (Float.fma (-.r) r a)) ~tie:false
+
+let mul_exact a b =
   let r = a *. b in
   if (not (all_finite [ a; b ])) || a = 0. || b = 0. then exact r
   else
@@ -148,7 +181,7 @@ let mul a b =
           sign_of_sum (p :: e :: negate_all ts))
     else { (make_approx p e) with scale = -(ka + kb) }
 
-let div a b =
+let div_exact a b =
   let r = a /. b in
   if (not (all_finite [ a; b ])) || a = 0. || b = 0. then exact r
   else
@@ -172,7 +205,7 @@ let div a b =
         scale = kb - ka;
       }
 
-let sqrt a =
+let sqrt_exact a =
   let r = Float.sqrt a in
   if (not (Float.is_finite r)) || r <= 0. then exact r
   else
@@ -190,6 +223,18 @@ let sqrt a =
             (List.concat_map (fun x -> List.map (fun y -> (x, y)) ts) ts)
         in
         sign_of_sum (a' :: squares))
+
+let mul a b =
+  let r = a *. b in
+  if in_fast_range r then mul_fast a b r else mul_exact a b
+
+let div a b =
+  let r = a /. b in
+  if in_fast_range r && in_fast_range a && in_fast_range b then div_fast a b r
+  else div_exact a b
+
+let sqrt a =
+  if in_fast_range a then sqrt_fast a (Float.sqrt a) else sqrt_exact a
 
 (** [fma a b c] with its exact error, by Boldo and Muller's ErrFma ("Exact and
     approximated error of the FMA", IEEE TC 2011): [a*b + c = r1 + r2 + r3]
@@ -247,6 +292,8 @@ let fma_approx a b c =
   else if a = 0. || b = 0. then exact r1
   else if not (Float.is_finite r1 && Float.is_finite (a *. b)) then
     scaled_fma a b c
+  else if Float.abs (a *. b) >= tiny && Float.abs r1 >= tiny then
+    err_fma a b c r1 (* the common case, checked before any scaling *)
   else
     let a', ka = normalise a and b', kb = normalise b in
     let c' = Float.ldexp c (ka + kb) in

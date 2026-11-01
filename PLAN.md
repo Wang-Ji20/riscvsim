@@ -181,6 +181,8 @@ TLB) waits for the Phase 1 bus design.
       release build (integer benchmarks 70–100), 2–5 words/instr. The P1
       target (50 MIPS) is met on the micro geometric mean; `fp` (6 MIPS)
       is the outlier.
-- [ ] O8. FP fast path (`fp` is 10× slower than the integer benchmarks)
+- [x] O8a. FP fast path for mul/div/sqrt/fma: `fp` 6.2 → 17.7 MIPS. Glue
+      code (format closures, result tuples) is the next FP cost.
+- [x] `ocamlrun.rv` rebuilt; the `@ocaml` stress test takes 12 s (was 65 s)
 - [ ] O1d. C kernels and the OCaml stress test in the harness
 - [ ] O3. Software TLB (after the Phase 1 bus design)

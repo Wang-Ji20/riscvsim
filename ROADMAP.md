@@ -33,8 +33,8 @@ testable. A step marked ✅ is done in the user-mode simulator.
     static glibc 2.44, both against a native host build.
 0.7 ✅ OCaml 5.4.1's bytecode runtime (`ocamlrun`, static riscv64) runs
     host-compiled bytecode with output identical to the host
-    (`dune build @ocaml`). The stress program takes about 65 s, roughly
-    400M instructions, which motivates Phase 8. Multi-domain programs
+    (`dune build @ocaml`). The stress program, roughly 400M instructions,
+    took 65 s at first and 12 s after the first Phase 8 steps. Multi-domain programs
     (`Domain.spawn`) will need `clone(CLONE_THREAD)`, that is, real guest
     threads.
 

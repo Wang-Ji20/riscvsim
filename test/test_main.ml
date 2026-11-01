@@ -350,6 +350,34 @@ let prop_fp_directed =
 
 (** FMA against an exact integer model: operands are [i * 2^k] with small [i]
     and [k], so [a*b + c] scaled by [2^-E] is an exact [int64]. *)
+(* Doubles concentrated around the FPU fast-path limits (2^-900, 2^900, and
+   their square roots), with short mantissas too, so exact results occur. *)
+let double_near_limits =
+  let mantissa =
+    G.oneof [ G.map float_of_int (G.int_range 1 (1 lsl 53)); G.map float_of_int (G.int_range 1 64) ]
+  and exponent =
+    G.oneof [ G.int_range (-1130) 1023; G.map (fun d -> -953 + d) (G.int_range (-8) 8);
+              G.map (fun d -> 847 + d) (G.int_range (-8) 8); G.map (fun d -> -503 + d) (G.int_range (-8) 8);
+              G.map (fun d -> 397 + d) (G.int_range (-8) 8); G.int_range (-60) 0 ]
+  in
+  G.oneof
+    [ float_interesting;
+      (let+ m = mantissa and+ e = exponent and+ neg = G.bool in
+       Float.ldexp (if neg then -.m else m) e) ]
+  [@@ocamlformat "disable"]
+
+let same_approx (x : Fpu.approx) (y : Fpu.approx) =
+  Int64.bits_of_float x.r = Int64.bits_of_float y.r
+  && x.err = y.err && x.tie = y.tie && x.scale = y.scale
+
+let prop_fpu_fast_paths =
+  T.make ~name:"FPU fast paths agree with the exact mul/div/sqrt" ~count:20_000
+    ~print:(fun (a, b) -> Printf.sprintf "(%h, %h)" a b)
+    (G.pair double_near_limits double_near_limits) (fun (a, b) ->
+      same_approx (Fpu.mul a b) (Fpu.mul_exact a b)
+      && same_approx (Fpu.div a b) (Fpu.div_exact a b)
+      && same_approx (Fpu.sqrt (Float.abs a)) (Fpu.sqrt_exact (Float.abs a)))
+
 let prop_fma_exact =
   let operand bits lo hi =
     G.pair (G.int_range (-(1 lsl bits)) (1 lsl bits)) (G.int_range lo hi)
@@ -514,7 +542,7 @@ let prop_profile =
          = List.map (fun (_, e) -> e.Stats.count) hot)
 
 let properties =
-  [ prop_profile; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
+  [ prop_profile; prop_fpu_fast_paths; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
     prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 

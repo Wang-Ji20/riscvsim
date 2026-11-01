@@ -114,6 +114,13 @@ corner cases. Another option is reading the host CPU's own exception
 flags through a small C binding. Either way, `@spike` and `@conformance`
 must stay green.
 
+**First step done (2026-11-01).** A fast path for mul, div and sqrt when
+all values lie in [2^-900, 2^900], where one FMA gives the exact error
+(see [the floating-point design](../design/floating-point.md#the-fast-path)),
+and FMA's common case checked before any scaling. `fp`: 6.2 → 17.7
+MIPS, allocation from 253 to 66 words per instruction. The rest of the
+cost is glue code in `Fpu` and `Cpu.fp_exec`.
+
 ### O9: Just-in-time compiler
 
 Translate hot blocks into host machine code at run time. This is how
