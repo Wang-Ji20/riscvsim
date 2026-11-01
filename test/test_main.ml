@@ -491,8 +491,30 @@ let prop_rvc_programs =
       in
       regs false = regs true)
 
+(* The profile counts every execution exactly once, per pc and per mnemonic. *)
+let prop_profile =
+  let gen =
+    let+ instrs = G.array_size (G.return 8) (Gen_instr.instr ())
+    and+ pcs = G.list (G.int_bound 7) in
+    (instrs, pcs)
+  in
+  T.make ~name:"profile counts each execution once" ~count:300 gen
+    (fun (instrs, pcs) ->
+      let p = Stats.create_profile () in
+      List.iter (fun n -> Stats.record p (Int64.of_int (4 * n)) instrs.(n)) pcs;
+      let total = List.fold_left (fun acc (_, n) -> acc + n) 0 in
+      let hot = Stats.hot_pcs p in
+      let occurrences n = List.length (List.filter (( = ) n) pcs) in
+      total (Stats.by_mnemonic p) = List.length pcs
+      && List.for_all
+           (fun (pc, (e : Stats.entry)) ->
+             e.count = occurrences (Int64.to_int pc / 4))
+           hot
+      && List.sort (fun a b -> compare b a) (List.map (fun (_, e) -> e.Stats.count) hot)
+         = List.map (fun (_, e) -> e.Stats.count) hot)
+
 let properties =
-  [ prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
+  [ prop_profile; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
     prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 

@@ -66,6 +66,8 @@ The parts, from the bottom up:
 - **`Image`** is the common format for a loadable program: memory
   segments, the entry address, and symbol names.
 - **`Disasm`** prints machine code as text.
+- **`Stats`** measures runs (speed, allocation) and profiles them (which
+  instructions run most), for [performance work](perf/README.md).
 - **`bin/main.ml`** is the command-line tool that ties them together.
 
 ## The life of a program

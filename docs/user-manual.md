@@ -67,6 +67,8 @@ and so is your environment.
 | `--fuel N` | Stop after N instructions (see *fuel*) |
 | `--rvc`, `-c` | Use 16-bit *compressed* instructions when assembling |
 | `--signature FILE` | After the run, save the test *signature* to FILE |
+| `--stats` | Print the instruction count, time, speed (*MIPS*) and allocation |
+| `--profile` | Print the most executed mnemonics and instructions (slower) |
 
 The exit status is the program's own exit status. Two values are special:
 

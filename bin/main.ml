@@ -41,7 +41,14 @@ let dump_regs (cpu : Cpu.t) =
     cpu.f;
   if cpu.fflags <> 0 then eprintf "fflags = 0x%02x\n" cpu.fflags
 
-let run path args rvc trace regs fuel strace signature =
+(** Combine the optional per-instruction hooks into one. *)
+let combine_hooks hooks =
+  match List.filter_map Fun.id hooks with
+  | [] -> None
+  | [ h ] -> Some h
+  | hs -> Some (fun pc i -> List.iter (fun h -> h pc i) hs)
+
+let run path args rvc trace regs fuel strace signature stats profile =
   match load_image ~rvc path with
   | Error e ->
       prerr_endline e;
@@ -63,7 +70,13 @@ let run path args rvc trace regs fuel strace signature =
               Printf.eprintf "  %8Lx: %s\n%!" pc (Instr.to_string i))
         else None
       in
-      let outcome = Os.run ?fuel ?trace os in
+      let prof = if profile then Some (Stats.create_profile ()) else None in
+      let hook = combine_hooks [ trace; Option.map Stats.record prof ] in
+      let before = Stats.sample cpu.instret in
+      let outcome = Os.run ?fuel ?trace:hook os in
+      let summary = Stats.diff before (Stats.sample cpu.instret) in
+      if stats then Format.eprintf "%a%!" Stats.pp_summary summary;
+      Option.iter (Format.eprintf "%a%!" (Stats.pp_profile ?top:None)) prof;
       if regs then dump_regs cpu;
       Option.iter
         (fun file ->
@@ -153,11 +166,28 @@ let run_cmd =
             "After the run, write the memory between $(b,begin_signature) and \
              $(b,end_signature) to $(docv) (riscv-arch-test format).")
   in
+  let stats =
+    Arg.(
+      value & flag
+      & info [ "stats" ]
+          ~doc:
+            "Print the instruction count, run time, speed (MIPS) and \
+             allocation per instruction to stderr. Costs nothing.")
+  in
+  let profile =
+    Arg.(
+      value & flag
+      & info [ "profile" ]
+          ~doc:
+            "Count executions per instruction and print the most executed \
+             mnemonics and addresses to stderr. Slows the run down.")
+  in
   Cmd.v
     (Cmd.info "run"
        ~doc:"Assemble (if needed) and run a program as a Linux process.")
     Term.(
-      const run $ file $ args $ rvc $ trace $ regs $ fuel $ strace $ signature)
+      const run $ file $ args $ rvc $ trace $ regs $ fuel $ strace $ signature
+      $ stats $ profile)
 
 let asm_cmd =
   let output =
