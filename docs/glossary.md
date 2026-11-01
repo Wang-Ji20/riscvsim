@@ -14,6 +14,13 @@ riscvsim includes its own.
 **Assembly language.** The human-readable form of machine instructions,
 with one line per instruction. Files usually end in `.s` or `.S`.
 
+**Boxing.** Storing a value in its own small block of heap memory and
+passing around a pointer to it. OCaml boxes 64-bit integers (`int64`)
+whenever they are stored in an array or record field, or returned from
+a function that isn't inlined. Each box costs an allocation, so
+riscvsim's hot path avoids them. The opposite is *unboxed*: the value
+sits directly in a machine register or in a byte buffer.
+
 **Bytecode.** Instructions for a *virtual* machine rather than a real
 processor. OCaml can compile programs to bytecode, which a program called
 `ocamlrun` then interprets.
@@ -60,6 +67,11 @@ stops, so that a looping program can't hang a test.
 **HTIF (Host-Target Interface).** A simple convention used by RISC-V test
 programs: writing a value to a memory location called `tohost` asks the
 simulator to stop.
+
+**Inlining.** A compiler optimization that copies a small function's
+body into the place it's called, instead of calling it. Besides saving
+the call, it lets the compiler keep values unboxed across what used to
+be a function boundary.
 
 **Instruction set architecture (ISA).** The contract between software and
 a processor: the list of instructions, what each does, and how each is

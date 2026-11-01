@@ -211,7 +211,7 @@ let prop_li =
       let rd = Reg.of_int 10 in
       let seq = Assembler.li_sequence rd v in
       let cpu = Cpu.create () in
-      List.iter (fun i -> Cpu.execute cpu i ~pc:0L ~len:4 ~bits:0) seq;
+      List.iter (fun i -> Cpu.execute cpu i ~len:4 ~bits:0) seq;
       List.length seq <= 8 && Cpu.get cpu rd = v)
 
 let pair64 = G.pair int64_interesting int64_interesting
@@ -487,7 +487,7 @@ let prop_rvc_programs =
       in
       let regs rvc =
         let _, outcome, cpu = run_source ~rvc src in
-        (outcome, Array.copy cpu.x)
+        (outcome, List.init 32 (Cpu.get_x cpu))
       in
       regs false = regs true)
 
@@ -682,7 +682,7 @@ let test_semantics () =
   let cpu =
     regs_after "li t0, 5\naddi zero, t0, 1\nmv a0, zero\nli a7, 93\necall"
   in
-  check "x0 is hard-wired to zero" (cpu.x.(0) = 0L);
+  check "x0 is hard-wired to zero" ((Cpu.get_x cpu 0) = 0L);
   let _, outcome, _ = run_source ".word 0" in
   check "all-zero word is an illegal instruction"
     (match outcome with
@@ -731,10 +731,10 @@ let test_semantics () =
        ecall"
   in
   check "singles are NaN-boxed in FP registers"
-    (Int64.shift_right_logical cpu.x.(10) 32 = 0xffffffffL);
-  check "fmv.x.w sign-extends the raw bits" (cpu.x.(11) = 0x40400000L);
+    (Int64.shift_right_logical (Cpu.get_x cpu 10) 32 = 0xffffffffL);
+  check "fmv.x.w sign-extends the raw bits" ((Cpu.get_x cpu 11) = 0x40400000L);
   check "unboxed single operand reads as canonical NaN"
-    (cpu.x.(12) = 0x7fc00000L);
+    ((Cpu.get_x cpu 12) = 0x7fc00000L);
   let cpu =
     regs_after
       "li t0, 2\n\
@@ -750,7 +750,7 @@ let test_semantics () =
        ecall"
   in
   check "dynamic rounding mode from frm (rdn: 3.5 -> 3)"
-    (cpu.x.(10) = 3L && cpu.x.(11) = 2L);
+    ((Cpu.get_x cpu 10) = 3L && (Cpu.get_x cpu 11) = 2L);
   let out, _, _ =
     run_source
       "li a0, 1\n\

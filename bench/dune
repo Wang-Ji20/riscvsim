@@ -1,5 +1,6 @@
-; Benchmarks (docs/perf/method.md). `dune build @bench` prints a table;
-; `dune exec bench/run.exe -- --csv docs/perf/results.csv` also records it.
+; Benchmarks (docs/perf/method.md), always in the release profile:
+;   dune build --profile release @bench
+;   dune exec --profile release bench/run.exe -- --csv docs/perf/results.csv
 
 (executable
  (name run)

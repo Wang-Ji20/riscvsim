@@ -177,4 +177,10 @@ TLB) waits for the Phase 1 bus design.
       (`docs/perf/reports/2026-11-01-baseline.md`). Half the time is
       decoding, so O4 moves ahead of O2.
 - [x] O4. Decode cache: 5.7 → 31 MIPS (integer benchmarks about 40)
-- [ ] O2. Unboxed registers
+- [x] O2. Unboxed registers, pc and ALU results: 41 → 55–61 MIPS in a
+      release build (integer benchmarks 70–100), 2–5 words/instr. The P1
+      target (50 MIPS) is met on the micro geometric mean; `fp` (6 MIPS)
+      is the outlier.
+- [ ] O8. FP fast path (`fp` is 10× slower than the integer benchmarks)
+- [ ] O1d. C kernels and the OCaml stress test in the harness
+- [ ] O3. Software TLB (after the Phase 1 bus design)

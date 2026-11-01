@@ -168,7 +168,7 @@ let setup_stack (cpu : Cpu.t) (img : Image.t) ~argv ~env =
   List.iteri
     (fun k w -> Memory.store mem (Int64.add sp (Int64.of_int (8 * k))) 8 w)
     words;
-  cpu.x.(Reg.to_int Reg.sp) <- sp
+  Cpu.set cpu Reg.sp sp
 
 (* {1 Guest memory helpers} *)
 
@@ -537,7 +537,7 @@ let sys_gettimeofday t a =
 
 let sys_times t a =
   if a 0 <> 0L then zero t (a 0) 32;
-  t.cpu.instret
+  Int64.of_int t.cpu.instret
 
 (* {2 Memory} *)
 
@@ -600,7 +600,7 @@ let print t s (a : args) =
 let debug_calls : (int * (string * (t -> args -> int64))) list =
   [ (1, ("print_int", fun t a -> print t (Int64.to_string (a 0)) a));
     (2, ("print_float", fun t a -> print t (Fpu.string_of_single (Cpu.get_s t.cpu (Freg.of_int 10))) a));
-    (3, ("print_double", fun t a -> print t (Fpu.string_of_double (Int64.float_of_bits t.cpu.f.(10))) a));
+    (3, ("print_double", fun t a -> print t (Fpu.string_of_double (Int64.float_of_bits (Cpu.get_f t.cpu 10))) a));
     (4, ("print_string", fun t a -> print t (read_string t (a 0)) a));
     (10, ("exit", fun t _ -> t.cpu.exit_code <- Some 0; 0L));
     (11, ("print_char", fun t a -> print t (String.make 1 (Char.chr (int_arg a 0 land 0xff))) a));
@@ -662,8 +662,8 @@ let lookup t num =
 
 let syscall t =
   let cpu = t.cpu in
-  let a n = cpu.x.(10 + n) in
-  let num = Int64.to_int cpu.x.(17) in
+  let a n = Cpu.get_x cpu (10 + n) in
+  let num = Int64.to_int (Cpu.get_x cpu 17) in
   let name, result =
     match lookup t num with
     | None -> (Printf.sprintf "syscall_%d" num, i64 (-enosys))
@@ -679,7 +679,7 @@ let syscall t =
         (Printf.sprintf "%s(0x%Lx, 0x%Lx, 0x%Lx) = %Ld\n" name (a 0) (a 1) (a 2)
            result))
     t.strace;
-  if cpu.exit_code = None then cpu.x.(10) <- result
+  if cpu.exit_code = None then Cpu.set_x cpu 10 result
 
 (** Create a CPU running [img] as a Linux process. *)
 let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace

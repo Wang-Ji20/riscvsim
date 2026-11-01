@@ -208,8 +208,9 @@ The OCaml source must be the same version as your `ocamlc`.
 | `dune build @spike` | random programs compared against Spike | cross compiler; Spike |
 | `dune build @ocaml` | OCaml bytecode compared against your machine | a built `/tmp/ocamlrun.rv` |
 
-`dune build @bench` runs the benchmarks and prints their speed (see
-[the performance method](perf/method.md)).
+`dune build --profile release @bench` runs the benchmarks and prints
+their speed (see [the performance method](perf/method.md)). The release
+profile matters: the default one turns off optimizations across modules.
 
 Every test whose tools are missing prints "skipping" instead of failing.
 Paths can be overridden with environment variables: `RISCV_TESTS`,

@@ -59,17 +59,33 @@ heap and its peak memory belongs to that run alone. Host CPU counters
 are not collected automatically; use `perf stat` by hand (section 3).
 
 ```
-dune build @bench                                     # print the table
-dune exec bench/run.exe -- --csv docs/perf/results.csv  # also record it
-dune exec bench/run.exe -- --filter calls --runs 3      # a subset
+dune build --profile release @bench    # print the table
+dune exec --profile release bench/run.exe -- --csv docs/perf/results.csv
+dune exec --profile release bench/run.exe -- --filter calls --runs 3
 ```
 
 Each benchmark runs **once to warm up, then 5 times**. We report the
 **median** and the spread (minimum and maximum). Results are written as
 CSV for tools and as a Markdown table for people.
 
+**Build in release mode.** In its default (dev) profile, dune compiles
+with `-opaque`, which turns off inlining across modules, for example of
+`Memory.page_no` into `Cpu`. That changes the numbers a lot, so
+benchmarks always use `--profile release`.
+
 To keep measurements stable: close other heavy programs, use a fixed CPU
 frequency if possible, and compare only numbers taken on the same machine.
+
+**Compare by alternating.** Some machines, including laptops and WSL2,
+change speed by 30% or more over minutes. A "before" number from an hour
+ago is then useless. Instead, build the harness for both versions and run
+them alternately, `old new old new`:
+
+```
+dune build --profile release bench/run.exe && cp _build/default/bench/run.exe /tmp/run_new.exe
+git stash && dune build --profile release bench/run.exe && cp _build/default/bench/run.exe /tmp/run_old.exe && git stash pop
+for v in old new old new; do /tmp/run_$v.exe --dir bench/micro; done
+```
 
 ## 3. Profiling: finding where the time goes
 

@@ -52,6 +52,23 @@ example in a `Bytes` buffer accessed with `Bytes.get_int64_le`, which the
 OCaml compiler turns into a plain memory access. The goal is zero
 allocation per integer instruction.
 
+**Done (2026-11-01).** 41 → 55–61 MIPS (release build), allocation from
+24 to 2–5 words per instruction. Registers alone weren't enough. OCaml
+without flambda *boxes* an `int64` (see the [glossary](../glossary.md))
+in four situations, and each needed a fix:
+
+| Boxed when an int64... | Example | Fix |
+|---|---|---|
+| is stored in an array or record field | `x : int64 array`, `mutable pc : int64` | `Bytes` for registers and `pc`; `instret` became an `int` |
+| is returned by a call that isn't inlined | `alu`, `mulhu`, `Int64.unsigned_div` | `[@inline]`; no local functions inside, which block inlining |
+| comes out of a `let` over a `match` where any case is boxed | `let next_pc = match i with ...` | each case sets `pc` itself |
+| is passed to a function that isn't inlined | `Decode_cache.fetch t mem pc` | pass page and offset as plain ints |
+
+The compiler's intermediate code (`ocamlopt -dcmm`) shows every
+remaining `alloc`, which is how these were found. The rest come from
+memory addresses passed to `Memory.load`/`store`; O3 will remove most of
+them.
+
 ### O3: Software TLB
 
 Most accesses hit the same few pages. Keep a small cache, indexed by

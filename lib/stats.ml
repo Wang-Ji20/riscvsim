@@ -7,35 +7,33 @@
 
 (** {1 Summary} *)
 
-type sample = { time : float; instret : int64; words : float }
+type sample = { time : float; instret : int; words : float }
 
 let sample instret =
   { time = Unix.gettimeofday (); instret; words = Gc.minor_words () }
 
 type summary = {
-  instructions : int64;
+  instructions : int;
   seconds : float;
   alloc_words : float;  (** minor-heap words allocated *)
 }
 
 let diff before after =
   {
-    instructions = Int64.sub after.instret before.instret;
+    instructions = after.instret - before.instret;
     seconds = after.time -. before.time;
     alloc_words = after.words -. before.words;
   }
 
 let mips s =
-  if s.seconds <= 0. then 0.
-  else Int64.to_float s.instructions /. s.seconds /. 1e6
+  if s.seconds <= 0. then 0. else float s.instructions /. s.seconds /. 1e6
 
 let words_per_instr s =
-  if s.instructions = 0L then 0.
-  else s.alloc_words /. Int64.to_float s.instructions
+  if s.instructions = 0 then 0. else s.alloc_words /. float s.instructions
 
 let pp_summary ppf s =
   Format.fprintf ppf
-    "instructions: %Ld@\n\
+    "instructions: %d@\n\
      time:         %.3f s@\n\
      speed:        %.2f MIPS@\n\
      allocation:   %.2f words/instruction@\n"

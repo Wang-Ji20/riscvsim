@@ -97,7 +97,7 @@ let run_isolated img =
 
 type result = {
   bench : string;
-  instructions : int64;
+  instructions : int;
   median : float;
   min : float;
   max : float;
@@ -110,7 +110,7 @@ let median l =
   let n = Array.length a in
   if n mod 2 = 1 then a.(n / 2) else (a.((n / 2) - 1) +. a.(n / 2)) /. 2.
 
-let mips r = Int64.to_float r.instructions /. r.median /. 1e6
+let mips r = float r.instructions /. r.median /. 1e6
 
 let measure ~runs b =
   match b.load () with
@@ -148,7 +148,7 @@ let print_table results =
   print_endline "|---|---:|---:|---:|---:|---:|---:|";
   List.iter
     (fun r ->
-      Printf.printf "| %s | %Ld | %.3f | %.3f–%.3f | %.2f | %.1f | %.1f |\n"
+      Printf.printf "| %s | %d | %.3f | %.3f–%.3f | %.2f | %.1f | %.1f |\n"
         r.bench r.instructions r.median r.min r.max (mips r) r.words_per_instr
         (float r.peak_kb /. 1024.))
     results;
@@ -198,7 +198,7 @@ let append_csv path results =
       List.iter
         (fun r ->
           Printf.fprintf oc
-            "%s,%s,%s,%Ld,%.4f,%.4f,%.4f,%.3f,%.2f,%d,\"%s\",%s\n" date commit
+            "%s,%s,%s,%d,%.4f,%.4f,%.4f,%.3f,%.2f,%d,\"%s\",%s\n" date commit
             r.bench r.instructions r.median r.min r.max (mips r)
             r.words_per_instr r.peak_kb cpu Sys.ocaml_version)
         results)

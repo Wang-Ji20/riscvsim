@@ -170,7 +170,7 @@ maybe 5–20 MIPS, and we want hundreds.
     a fixed point. Micro benchmarks and `bench/run.exe` are done;
     **baseline (2026-11-01): 5.7 MIPS** geometric mean, half of it spent
     decoding (docs/perf/reports). C kernels and a boot benchmark remain.
-8.2 Represent registers with unboxed storage: a `Bytes`/Bigarray register
+8.2 ✅ Represent registers with unboxed storage: a `Bytes`/Bigarray register
     file accessed with `Bytes.get_int64_le`, or OCaml 5 unboxed types where
     they are available. Build with flambda `-O3`.
 8.3 ✅ **Decoded-instruction cache**, per page, so decoding happens

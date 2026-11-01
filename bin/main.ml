@@ -24,21 +24,21 @@ let load_image ~rvc path =
 
 let dump_regs (cpu : Cpu.t) =
   let open Printf in
-  eprintf "pc = 0x%016Lx  instret = %Ld\n" cpu.pc cpu.instret;
+  eprintf "pc = 0x%016Lx  instret = %d\n" (Cpu.pc cpu) cpu.instret;
   for r = 0 to 31 do
     eprintf "%-4s = 0x%016Lx%s"
       (Reg.abi_name (Reg.of_int r))
-      cpu.x.(r)
+      (Cpu.get_x cpu r)
       (if r mod 4 = 3 then "\n" else "  ")
   done;
-  Array.iteri
-    (fun r v ->
-      if v <> 0L then
-        eprintf "%-4s = 0x%016Lx (%s)\n"
-          (Freg.abi_name (Freg.of_int r))
-          v
-          (Fpu.string_of_double (Int64.float_of_bits v)))
-    cpu.f;
+  for r = 0 to 31 do
+    let v = Cpu.get_f cpu r in
+    if v <> 0L then
+      eprintf "%-4s = 0x%016Lx (%s)\n"
+        (Freg.abi_name (Freg.of_int r))
+        v
+        (Fpu.string_of_double (Int64.float_of_bits v))
+  done;
   if cpu.fflags <> 0 then eprintf "fflags = 0x%02x\n" cpu.fflags
 
 (** Combine the optional per-instruction hooks into one. *)
@@ -93,7 +93,7 @@ let run path args rvc trace regs fuel strace signature stats profile =
           if not regs then dump_regs cpu;
           134
       | Out_of_fuel ->
-          Printf.eprintf "riscvsim: instruction limit reached (%Ld executed)\n"
+          Printf.eprintf "riscvsim: instruction limit reached (%d executed)\n"
             cpu.instret;
           124)
 

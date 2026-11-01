@@ -21,15 +21,18 @@ let pp_trap ppf = function
   | Unknown_csr c -> Format.fprintf ppf "access to unimplemented CSR 0x%03x" c
   | Unhandled_ecall -> Format.pp_print_string ppf "ecall with no environment"
 
+(* Registers live in [Bytes] rather than an [int64 array]: an array stores
+   each int64 as a separate heap block, so every register write allocated.
+   [Bytes.get_int64_le]/[set_int64_le] compile to plain memory accesses. *)
 type t = {
-  x : int64 array;  (** [x.(0)] is never written *)
-  f : int64 array;  (** raw bits; singles are NaN-boxed *)
-  mutable pc : int64;
+  x : Bytes.t;  (** 32 little-endian int64s; [x0] is never written *)
+  f : Bytes.t;  (** 32 raw bit patterns; singles are NaN-boxed *)
+  pc_cell : Bytes.t;  (** the program counter, one int64; see {!pc} *)
   mem : Memory.t;
   decoded : Decode_cache.t;
   mutable fflags : int;
   mutable frm : int;
-  mutable instret : int64;
+  mutable instret : int;  (** instructions retired; 63 bits never overflow *)
   mutable reservation : int64 option;  (** LR/SC reservation address *)
   mutable exit_code : int option;
   mutable ecall : t -> unit;  (** environment call handler *)
@@ -41,19 +44,22 @@ let create () =
   let mem = Memory.create () and decoded = Decode_cache.create () in
   mem.on_code_write <- Decode_cache.invalidate decoded;
   {
-    x = Array.make 32 0L;
-    f = Array.make 32 0L;
-    pc = 0L;
+    x = Bytes.make (32 * 8) '\000';
+    f = Bytes.make (32 * 8) '\000';
+    pc_cell = Bytes.make 8 '\000';
     mem;
     decoded;
     fflags = 0;
     frm = 0;
-    instret = 0L;
+    instret = 0;
     reservation = None;
     exit_code = None;
     ecall = (fun _ -> raise (Trap Unhandled_ecall));
     mcsrs = Hashtbl.create 16;
   }
+
+let pc t = Bytes.get_int64_le t.pc_cell 0
+let set_pc t v = Bytes.set_int64_le t.pc_cell 0 v
 
 (** Copy a program image into memory and point [pc] at its entry. The stack and
     process environment are the job of {!Os}. *)
@@ -61,31 +67,49 @@ let load t (img : Image.t) =
   List.iter
     (fun (s : Image.segment) -> Memory.blit_bytes t.mem s.vaddr s.data)
     img.segments;
-  t.pc <- img.entry;
+  set_pc t img.entry;
   match List.assoc_opt "__global_pointer$" img.symbols with
-  | Some gp -> t.x.(Reg.to_int Reg.gp) <- gp
+  | Some gp -> Bytes.set_int64_le t.x (8 * (Reg.gp :> int)) gp
   | None -> ()
 
 (* {1 Register access} *)
 
-let get t r = t.x.(Reg.to_int r)
-let set t r v = if Reg.to_int r <> 0 then t.x.(Reg.to_int r) <- v
-let getf t r = t.f.(Freg.to_int r)
-let setf t r v = t.f.(Freg.to_int r) <- v
+(** Integer register [n] (0-31), by number. *)
+let get_x t n = Bytes.get_int64_le t.x (8 * n)
+
+let set_x t n v = if n <> 0 then Bytes.set_int64_le t.x (8 * n) v
+
+(** FP register [n] (0-31), as raw bits. *)
+let get_f t n = Bytes.get_int64_le t.f (8 * n)
+
+let set_f t n v = Bytes.set_int64_le t.f (8 * n) v
+let get t (r : Reg.t) = get_x t (r :> int)
+let set t (r : Reg.t) v = set_x t (r :> int) v
+let getf t (r : Freg.t) = get_f t (r :> int)
+let setf t (r : Freg.t) v = set_f t (r :> int) v
 let get_s t r = Fpu.unbox_s (getf t r)
 let set_s t r v = setf t r (Fpu.box_s v)
 
 (* {1 Integer helpers} *)
 
-let sext32 v = Int64.of_int32 (Int64.to_int32 v)
-let zext32 v = Int64.logand v 0xffff_ffffL
-let of_bool b = if b then 1L else 0L
-let sext ~bits v = Int64.shift_right (Int64.shift_left v (64 - bits)) (64 - bits)
+let[@inline] sext32 v = Int64.of_int32 (Int64.to_int32 v)
+let[@inline] zext32 v = Int64.logand v 0xffff_ffffL
+let[@inline] of_bool b = if b then 1L else 0L
+
+let[@inline] sext ~bits v =
+  Int64.shift_right (Int64.shift_left v (64 - bits)) (64 - bits)
+
+(* The helpers below are marked [@inline] so that the ALU's results stay
+   unboxed: OCaml (without flambda) boxes an int64 returned by a call, and
+   one boxed case makes every case of [alu] allocate. They avoid local
+   functions, which would prevent inlining. *)
+
+let[@inline] lo32 v = Int64.logand v 0xffff_ffffL
+let[@inline] hi32 v = Int64.shift_right_logical v 32
 
 (** High 64 bits of the unsigned 128-bit product. *)
-let mulhu a b =
+let[@inline] mulhu a b =
   let open Int64 in
-  let lo32 v = logand v 0xffff_ffffL and hi32 v = shift_right_logical v 32 in
   let a0 = lo32 a and a1 = hi32 a and b0 = lo32 b and b1 = hi32 b in
   let p00 = mul a0 b0
   and p01 = mul a0 b1
@@ -94,26 +118,37 @@ let mulhu a b =
   let mid = add (add (hi32 p00) (lo32 p01)) (lo32 p10) in
   add (add (add p11 (hi32 p01)) (hi32 p10)) (hi32 mid)
 
-let mulh a b =
+let[@inline] mulh a b =
   let open Int64 in
   let h = mulhu a b in
   let h = if compare a 0L < 0 then sub h b else h in
   if compare b 0L < 0 then sub h a else h
 
-let mulhsu a b =
+let[@inline] mulhsu a b =
   let h = mulhu a b in
   if Int64.compare a 0L < 0 then Int64.sub h b else h
 
 (* Division follows the spec: no traps. x/0 = -1, x%0 = x, and
    MIN / -1 = MIN with remainder 0. *)
-let sdiv ~min a b =
+let[@inline] sdiv ~min a b =
   if b = 0L then -1L else if a = min && b = -1L then a else Int64.div a b
 
-let srem ~min a b =
+let[@inline] srem ~min a b =
   if b = 0L then a else if a = min && b = -1L then 0L else Int64.rem a b
 
-let udiv a b = if b = 0L then -1L else Int64.unsigned_div a b
-let urem a b = if b = 0L then a else Int64.unsigned_rem a b
+(* [Int64.unsigned_div] with the same algorithm, but inlinable. *)
+let[@inline] unsigned_div n d =
+  let open Int64 in
+  if compare d 0L < 0 then if unsigned_compare n d < 0 then 0L else 1L
+  else
+    let q = shift_left (div (shift_right_logical n 1) d) 1 in
+    let r = sub n (mul q d) in
+    if unsigned_compare r d >= 0 then succ q else q
+
+let[@inline] udiv a b = if b = 0L then -1L else unsigned_div a b
+
+let[@inline] urem a b =
+  if b = 0L then a else Int64.sub a (Int64.mul (unsigned_div a b) b)
 
 let rec clz64 v n =
   if n = 64 || Int64.compare v 0L < 0 then n
@@ -136,17 +171,17 @@ let cpop v =
   in
   go v 0
 
-let rol a n =
+let[@inline] rol a n =
   Int64.(logor (shift_left a n) (shift_right_logical a ((64 - n) land 63)))
 
-let ror a n = rol a ((64 - n) land 63)
+let[@inline] ror a n = rol a ((64 - n) land 63)
 
-let rol32 a n =
+let[@inline] rol32 a n =
   let a = zext32 a in
   sext32
     Int64.(logor (shift_left a n) (shift_right_logical a ((32 - n) land 31)))
 
-let ror32 a n = rol32 a ((32 - n) land 31)
+let[@inline] ror32 a n = rol32 a ((32 - n) land 31)
 
 let bytes_map f v =
   let r = ref 0L in
@@ -161,7 +196,7 @@ let rev8 = bytes_map (fun i b -> Int64.shift_left b (8 * (7 - i)))
 let orc_b =
   bytes_map (fun i b -> if b = 0L then 0L else Int64.shift_left 0xffL (8 * i))
 
-let alu op a b =
+let[@inline] alu op a b =
   let open Int64 in
   let sh = to_int b land 63 and sh32 = to_int b land 31 in
   let u32 = zext32 in
@@ -217,7 +252,7 @@ let alu op a b =
   | Binv -> logxor a (shift_left 1L sh)
   | Bext -> logand (shift_right_logical a sh) 1L
 
-let imm_alu op a imm =
+let[@inline] imm_alu op a imm =
   let b = Int64.of_int imm in
   match op with
   | Addi -> alu Add a b
@@ -228,7 +263,7 @@ let imm_alu op a imm =
   | Andi -> alu And a b
   | Addiw -> alu Addw a b
 
-let shift_alu op a shamt =
+let[@inline] shift_alu op a shamt =
   let b = Int64.of_int shamt in
   match op with
   | Slli -> alu Sll a b
@@ -260,7 +295,7 @@ let unary op a =
   | Rev8 -> rev8 a
   | Orc_b -> orc_b a
 
-let branch_taken op a b =
+let[@inline] branch_taken op a b =
   match op with
   | Beq -> a = b
   | Bne -> a <> b
@@ -289,7 +324,7 @@ let csr_read t csr =
   | 0x001 -> Int64.of_int t.fflags
   | 0x002 -> Int64.of_int t.frm
   | 0x003 -> Int64.of_int ((t.frm lsl 5) lor t.fflags)
-  | 0xc00 | 0xc01 | 0xc02 -> t.instret (* cycle = time = instret *)
+  | 0xc00 | 0xc01 | 0xc02 -> Int64.of_int t.instret (* cycle = time *)
   | 0x301 (* misa: RV64 IMAFDC + U *) ->
       Int64.(logor (shift_left 2L 62) (of_int 0x10112d))
   | 0xf11 | 0xf12 | 0xf13 | 0xf14 (* vendor/arch/impl ids, hart id *) -> 0L
@@ -434,101 +469,91 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
 
 (* {1 Fetch, decode, execute} *)
 
-let execute t (i : Instr.t) ~pc ~len ~bits =
-  let next = Int64.add pc (Int64.of_int len) in
-  let off o = Int64.add pc (Int64.of_int o) in
-  let addr rs1 o = Int64.add (get t rs1) (Int64.of_int o) in
-  let next_pc =
-    match i with
-    | Lui { rd; imm } ->
-        set t rd (sext32 (Int64.of_int (imm lsl 12)));
-        next
-    | Auipc { rd; imm } ->
-        set t rd (Int64.add pc (sext32 (Int64.of_int (imm lsl 12))));
-        next
-    | Jal { rd; offset } ->
-        set t rd next;
-        off offset
-    | Jalr { rd; rs1; offset } ->
-        let target = Int64.logand (addr rs1 offset) (-2L) in
-        set t rd next;
-        target
-    | Branch { op; rs1; rs2; offset } ->
-        if branch_taken op (get t rs1) (get t rs2) then off offset else next
-    | Load { op; rd; rs1; offset } ->
-        set t rd (load_value t op (addr rs1 offset));
-        next
-    | Store { op; rs1; rs2; offset } ->
-        Memory.store t.mem (addr rs1 offset) (store_size op) (get t rs2);
-        next
-    | Op_imm { op; rd; rs1; imm } ->
-        set t rd (imm_alu op (get t rs1) imm);
-        next
-    | Shift_imm { op; rd; rs1; shamt } ->
-        set t rd (shift_alu op (get t rs1) shamt);
-        next
-    | Op { op; rd; rs1; rs2 } ->
-        set t rd (alu op (get t rs1) (get t rs2));
-        next
-    | Unary { op; rd; rs1 } ->
-        set t rd (unary op (get t rs1));
-        next
-    | Fence _ | Fence_i -> next (* the decode cache is always coherent *)
-    | Ecall ->
-        t.ecall t;
-        next
-    | Ebreak -> raise (Trap Breakpoint)
-    | Csr { op; rd; src; csr } ->
-        let v, writes =
-          match src with
-          | Rs1 r -> (get t r, Reg.to_int r <> 0 || op = Csrrw)
-          | Uimm u -> (Int64.of_int u, u <> 0 || op = Csrrw)
-        in
-        (* csrrw with rd = zero must not read (no read side effects) *)
-        let old =
-          if op = Csrrw && Reg.to_int rd = 0 then 0L else csr_read t csr
-        in
-        (if writes then
-           let nv =
-             match op with
-             | Csrrw -> v
-             | Csrrs -> Int64.logor old v
-             | Csrrc -> Int64.logand old (Int64.lognot v)
-           in
-           csr_write t csr nv);
-        set t rd old;
-        next
-    | Amo { op; width; rd; rs1; rs2; _ } ->
-        amo t ~op ~width ~rd ~rs1 ~rs2;
-        next
-    | Fload { fmt = D; rd; rs1; offset } ->
-        setf t rd (Memory.load t.mem (addr rs1 offset) 8);
-        next
-    | Fload { fmt = S; rd; rs1; offset } ->
-        set_s t rd (Int64.to_int32 (Memory.load t.mem (addr rs1 offset) 4));
-        next
-    | Fstore { fmt; rs1; rs2; offset } ->
-        Memory.store t.mem (addr rs1 offset)
-          (if fmt = D then 8 else 4)
-          (getf t rs2);
-        next
-    | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _ | Fclass _ | Fcvt_to_int _
-    | Fcvt_of_int _ | Fcvt_fmt _ | Fmv_to_int _ | Fmv_of_int _ ->
-        fp_exec t ~bits i;
-        next
-  in
-  t.pc <- next_pc;
-  t.instret <- Int64.succ t.instret
+let[@inline] offset_from base o = Int64.add base (Int64.of_int o)
+let[@inline] address t rs1 o = offset_from (get t rs1) o
+
+(** Execute an instruction that doesn't jump; the caller advances [pc]. *)
+let execute_straight t (i : Instr.t) ~pc ~bits =
+  match i with
+  | Lui { rd; imm } -> set t rd (sext32 (Int64.of_int (imm lsl 12)))
+  | Auipc { rd; imm } ->
+      set t rd (Int64.add pc (sext32 (Int64.of_int (imm lsl 12))))
+  | Load { op; rd; rs1; offset } ->
+      set t rd (load_value t op (address t rs1 offset))
+  | Store { op; rs1; rs2; offset } ->
+      Memory.store t.mem (address t rs1 offset) (store_size op) (get t rs2)
+  | Op_imm { op; rd; rs1; imm } -> set t rd (imm_alu op (get t rs1) imm)
+  | Shift_imm { op; rd; rs1; shamt } ->
+      set t rd (shift_alu op (get t rs1) shamt)
+  | Op { op; rd; rs1; rs2 } -> set t rd (alu op (get t rs1) (get t rs2))
+  | Unary { op; rd; rs1 } -> set t rd (unary op (get t rs1))
+  | Fence _ | Fence_i -> () (* the decode cache is always coherent *)
+  | Ecall -> t.ecall t
+  | Ebreak -> raise (Trap Breakpoint)
+  | Csr { op; rd; src; csr } ->
+      let v, writes =
+        match src with
+        | Rs1 r -> (get t r, (r :> int) <> 0 || op = Csrrw)
+        | Uimm u -> (Int64.of_int u, u <> 0 || op = Csrrw)
+      in
+      (* csrrw with rd = zero must not read (no read side effects) *)
+      let old = if op = Csrrw && (rd :> int) = 0 then 0L else csr_read t csr in
+      (if writes then
+         let nv =
+           match op with
+           | Csrrw -> v
+           | Csrrs -> Int64.logor old v
+           | Csrrc -> Int64.logand old (Int64.lognot v)
+         in
+         csr_write t csr nv);
+      set t rd old
+  | Amo { op; width; rd; rs1; rs2; _ } -> amo t ~op ~width ~rd ~rs1 ~rs2
+  | Fload { fmt = D; rd; rs1; offset } ->
+      setf t rd (Memory.load t.mem (address t rs1 offset) 8)
+  | Fload { fmt = S; rd; rs1; offset } ->
+      set_s t rd (Int64.to_int32 (Memory.load t.mem (address t rs1 offset) 4))
+  | Fstore { fmt; rs1; rs2; offset } ->
+      Memory.store t.mem (address t rs1 offset)
+        (if fmt = D then 8 else 4)
+        (getf t rs2)
+  | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _ | Fclass _ | Fcvt_to_int _
+  | Fcvt_of_int _ | Fcvt_fmt _ | Fmv_to_int _ | Fmv_of_int _ ->
+      fp_exec t ~bits i
+  | Jal _ | Jalr _ | Branch _ -> assert false
+
+(* Each case sets [pc] itself: a shared [let next_pc = match ...] would box
+   the int64 in every case. *)
+let execute t (i : Instr.t) ~len ~bits =
+  let pc = pc t in
+  let next = offset_from pc len in
+  (match i with
+  | Jal { rd; offset } ->
+      set t rd next;
+      set_pc t (offset_from pc offset)
+  | Jalr { rd; rs1; offset } ->
+      let target = Int64.logand (address t rs1 offset) (-2L) in
+      set t rd next;
+      set_pc t target
+  | Branch { op; rs1; rs2; offset } ->
+      set_pc t
+        (if branch_taken op (get t rs1) (get t rs2) then offset_from pc offset
+         else next)
+  | _ ->
+      execute_straight t i ~pc ~bits;
+      set_pc t next);
+  t.instret <- t.instret + 1
 
 (** Execute one instruction. Raises [Trap] on an exception, leaving [pc] at the
     faulting instruction. *)
 let step ?trace t =
-  let pc = t.pc in
-  match Decode_cache.fetch t.decoded t.mem pc with
-  | Error bits -> raise (Trap (Illegal_instruction bits))
-  | Ok { instr; len; bits } ->
-      Option.iter (fun f -> f pc instr) trace;
-      execute t instr ~pc ~len ~bits
+  let pc = pc t in
+  let page = Memory.page_no pc and off = Memory.offset pc in
+  match Decode_cache.fetch t.decoded t.mem ~page ~off with
+  | exception Decode_cache.Illegal bits ->
+      raise (Trap (Illegal_instruction bits))
+  | { instr; len; bits } ->
+      (match trace with Some f -> f pc instr | None -> ());
+      execute t instr ~len ~bits
 
 type outcome =
   | Exited of int
@@ -544,6 +569,6 @@ let run ?(fuel = max_int) ?trace t =
     | None -> (
         match step ?trace t with
         | () -> loop (n + 1)
-        | exception Trap trap -> Trapped { trap; pc = t.pc })
+        | exception Trap trap -> Trapped { trap; pc = pc t })
   in
   loop 0
