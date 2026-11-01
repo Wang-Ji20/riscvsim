@@ -386,7 +386,7 @@ let arch_state (hart : Hart.t) =
   in
   let zero_page = Bytes.make Memory.page_size '\000' in
   ( (Bytes.copy hart.x, Bytes.copy hart.f, Hart.pc hart, hart.instret),
-    (hart.fflags, hart.frm, hart.reservation),
+    (hart.fflags, hart.frm, Bus.reservation hart.bus ~hartid:0),
     sorted hart.mcsrs (fun k v -> [ (k, v) ]),
     sorted hart.mem.pages (fun n (p : Memory.page) ->
         if Bytes.equal p.bytes zero_page then [] else [ (n, Bytes.copy p.bytes) ]) )
@@ -411,7 +411,7 @@ let prop_precise_traps =
       Array.iteri (Hart.set_f hart) fregs;
       Hart.set_pc hart 0x10000L;
       hart.frm <- frm;
-      if reserved then hart.reservation <- Some (Hart.get_x hart 10);
+      if reserved then Bus.reserve hart.bus ~hartid:0 (Hart.get_x hart 10);
       Memory.store hart.mem 0x20000L 8 0x1122334455667788L;
       let before = arch_state hart in
       match Hart.execute hart i ~len:4 ~bits:(encode_exn i) with
@@ -922,6 +922,38 @@ let test_machine () =
     (Result.is_error (Snapshot.restore m (String.sub snap 0 (String.length snap - 3))));
   check "a snapshot from a different machine is rejected"
     (Result.is_error (Snapshot.restore (Machine.create ~harts:2 (Bus.user ())) snap));
+  (* hart 0: lr.d then sc.d at 0x20000; hart 1 stores in between *)
+  let sc_result ~other_store =
+    let img =
+      assemble
+        "li t0, 0x20000\nlr.d a0, (t0)\nreserved: li a1, 7\nsc.d a2, a1, (t0)\n\
+         done: j done\nother: sd a1, 0(t5)"
+    in
+    let sym name = List.assoc name img.symbols in
+    let m = Machine.create ~harts:2 (Bus.user ()) in
+    List.iter
+      (fun (seg : Image.segment) -> Memory.blit_bytes (Bus.ram m.bus) seg.vaddr seg.data)
+      img.segments;
+    let h0 = Machine.hart m 0 and h1 = Machine.hart m 1 in
+    Hart.set_pc h0 img.entry;
+    while Hart.pc h0 <> sym "reserved" do Hart.step h0 done;
+    (match other_store with
+     | `None -> ()
+     | `Own -> Bus.store m.bus ~hartid:0 0x20000L 8 5L
+     | `Other addr ->
+         Hart.set_x h1 30 addr;
+         Hart.set_pc h1 (sym "other");
+         Hart.step h1);
+    while Hart.pc h0 <> sym "done" do Hart.step h0 done;
+    Hart.get_x h0 12
+  in
+  check_eq ~pp:Int64.to_string "sc succeeds when nobody else stored" 0L (sc_result ~other_store:`None);
+  check_eq ~pp:Int64.to_string "sc fails after another hart stores to the reserved address" 1L
+    (sc_result ~other_store:(`Other 0x20004L));
+  check_eq ~pp:Int64.to_string "another hart's store elsewhere leaves the reservation" 0L
+    (sc_result ~other_store:(`Other 0x20040L));
+  check_eq ~pp:Int64.to_string "the hart's own store leaves its reservation" 0L
+    (sc_result ~other_store:`Own);
   let m = Machine.create (Bus.user ()) in
   load_code m.bus "ecall";
   Hart.set_pc (Machine.hart m 0) 0x10000L;

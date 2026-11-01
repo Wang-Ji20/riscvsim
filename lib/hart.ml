@@ -30,7 +30,6 @@ and t = {
   mutable fflags : int;
   mutable frm : int;
   mutable instret : int;  (** instructions retired; 63 bits never overflow *)
-  mutable reservation : int64 option;  (** LR/SC reservation address *)
   mutable exit_code : int option;
   mutable env : env;  (** what [ecall] does *)
   mcsrs : (int, int64) Hashtbl.t;
@@ -57,7 +56,6 @@ let create ?(hartid = 0) ?(bus = Bus.user ()) () =
     fflags = 0;
     frm = 0;
     instret = 0;
-    reservation = None;
     exit_code = None;
     env = Trapping;
     mcsrs = Hashtbl.create 16;
@@ -446,11 +444,11 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
   match op with
   | Lr ->
       set t rd (norm (Memory.load t.mem addr size));
-      t.reservation <- Some addr
+      Bus.reserve t.bus ~hartid:t.hartid addr
   | Sc ->
-      let ok = t.reservation = Some addr in
-      if ok then Memory.store t.mem addr size (get t rs2);
-      t.reservation <- None;
+      let ok = Bus.reservation t.bus ~hartid:t.hartid = Some addr in
+      if ok then Bus.store t.bus ~hartid:t.hartid addr size (get t rs2);
+      Bus.cancel_reservation t.bus ~hartid:t.hartid;
       set t rd (if ok then 0L else 1L)
   | _ ->
       let old = norm (Memory.load t.mem addr size) in
@@ -472,7 +470,7 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
         | Amomaxu -> pick_u (fun c -> c >= 0)
         | Lr | Sc -> assert false
       in
-      Memory.store t.mem addr size v;
+      Bus.store t.bus ~hartid:t.hartid addr size v;
       set t rd old
 
 (* {1 Fetch, decode, execute} *)
@@ -489,7 +487,8 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Load { op; rd; rs1; offset } ->
       set t rd (load_value t op (address t rs1 offset))
   | Store { op; rs1; rs2; offset } ->
-      Bus.store t.bus (address t rs1 offset) (store_size op) (get t rs2)
+      Bus.store t.bus ~hartid:t.hartid (address t rs1 offset) (store_size op)
+        (get t rs2)
   | Op_imm { op; rd; rs1; imm } -> set t rd (imm_alu op (get t rs1) imm)
   | Shift_imm { op; rd; rs1; shamt } ->
       set t rd (shift_alu op (get t rs1) shamt)
@@ -526,7 +525,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Fload { fmt = S; rd; rs1; offset } ->
       set_s t rd (Int64.to_int32 (Bus.load t.bus (address t rs1 offset) 4))
   | Fstore { fmt; rs1; rs2; offset } ->
-      Bus.store t.bus (address t rs1 offset)
+      Bus.store t.bus ~hartid:t.hartid (address t rs1 offset)
         (if fmt = D then 8 else 4)
         (getf t rs2)
   | Farith _ | Fsqrt _ | Fsign _ | Fma _ | Fcmp _ | Fclass _ | Fcvt_to_int _

@@ -37,7 +37,7 @@ let save_hart b (h : Hart.t) =
   add_i64 b (Hart.pc h);
   List.iter (add_int b) [ h.instret; h.fflags; h.frm ];
   add_int b (Option.value h.exit_code ~default:(-1));
-  add_option b h.reservation;
+  add_option b (Bus.reservation h.bus ~hartid:h.hartid);
   Buffer.add_bytes b h.x;
   Buffer.add_bytes b h.f;
   let csrs = List.sort compare (List.of_seq (Hashtbl.to_seq h.mcsrs)) in
@@ -96,7 +96,7 @@ let restore_hart r (h : Hart.t) =
   h.fflags <- int r;
   h.frm <- int r;
   h.exit_code <- (match int r with -1 -> None | c -> Some c);
-  h.reservation <- option r;
+  Bus.set_reservation h.bus ~hartid:h.hartid (option r);
   Bytes.blit_string (take r 256) 0 h.x 0 256;
   Bytes.blit_string (take r 256) 0 h.f 0 256;
   Hashtbl.reset h.mcsrs;

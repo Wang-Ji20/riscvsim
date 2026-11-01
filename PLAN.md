@@ -205,4 +205,8 @@ docs/perf targets say Phases 1-5 need far less).
       device state through `Device.S`). A command-line option waits for
       the system-mode `run` command (Phases 4-5).
 
-Phase 1 is complete. Next: Phase 2, privileged ISA (M/S/U modes).
+Phase 1 is complete.
+
+# Phase 2: privileged ISA (ROADMAP 2.1-2.9)
+
+- [x] 2a. LR/SC reservations in the bus: another hart's store cancels them

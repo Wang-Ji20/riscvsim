@@ -88,6 +88,23 @@ Each hart answers the `mhartid` control register with its own number.
 Each also keeps its own decode cache, and a write to code invalidates
 every hart's cache, not only the writer's.
 
+**Atomic reservations.** `lr` (load-reserved) marks an address, and a
+later `sc` (store-conditional) succeeds only if nobody else wrote there
+in between. That pair is how locks are built. The reservations live in
+the bus, one per hart, because every hart's stores must see every other
+hart's reservation:
+
+```
+hart 0: lr.d a0, (x)        bus: hart 0 reserves x's 8-byte granule
+hart 1: sd   a1, (x)        bus: hart 0's reservation is cancelled
+hart 0: sc.d a2, a1, (x)    fails: a2 = 1
+```
+
+A hart's own stores leave its reservation in place; the specification
+allows either choice, and Spike makes the same one, which keeps
+single-hart runs identical to Spike's. When no hart holds a reservation,
+a store pays one extra comparison.
+
 ## The environment
 
 What `ecall` does is the one thing that differs between running a
