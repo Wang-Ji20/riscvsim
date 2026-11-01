@@ -122,7 +122,7 @@ let check t elf =
           | Some s when s = In_channel.with_open_bin ref In_channel.input_all -> Pass
           | Some _ -> Fail "signature differs from the reference"
           | None -> Fail "no signature symbols")
-      | _, Cpu.Trapped { trap; pc } -> Fail (Format.asprintf "%a at 0x%Lx" Cpu.pp_trap trap pc)
+      | _, Cpu.Trapped { trap; pc } -> Fail (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
       | _, (Cpu.Exited _ | Cpu.Out_of_fuel) -> Fail "did not exit cleanly")
 
 let run_test t =

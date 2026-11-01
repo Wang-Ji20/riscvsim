@@ -71,7 +71,7 @@ let run_sim exe =
       | Cpu.Exited c -> (Buffer.contents buf, c)
       | Cpu.Trapped { trap; pc } ->
           ( Buffer.contents buf
-            ^ Format.asprintf "\n<trap: %a at 0x%Lx>" Cpu.pp_trap trap pc,
+            ^ Format.asprintf "\n<trap: %a at 0x%Lx>" Trap.pp trap pc,
             -1 )
       | Cpu.Out_of_fuel -> (Buffer.contents buf ^ "\n<out of fuel>", -1))
 

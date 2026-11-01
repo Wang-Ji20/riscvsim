@@ -227,7 +227,7 @@ let on_riscvsim elf =
       | Cpu.Exited 0 ->
           Option.to_result ~none:"no signature" (Os.signature os.cpu image)
       | Cpu.Trapped { trap; pc } ->
-          Error (Format.asprintf "%a at 0x%Lx" Cpu.pp_trap trap pc)
+          Error (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
       | _ -> Error "did not halt")
 
 (** The signature as named 64-bit state slots: x1..x30, f0..f31, fflags. *)

@@ -68,8 +68,8 @@ let run_here (img : Image.t) =
     match outcome with
     | Cpu.Exited _ -> Buffer.contents buf
     | Cpu.Trapped { trap; pc } ->
-        Format.asprintf "%s<trap: %a at 0x%Lx>" (Buffer.contents buf)
-          Cpu.pp_trap trap pc
+        Format.asprintf "%s<trap: %a at 0x%Lx>" (Buffer.contents buf) Trap.pp
+          trap pc
     | Cpu.Out_of_fuel -> Buffer.contents buf ^ "<out of fuel>"
   in
   { summary; peak_kb = peak_kb (); output }

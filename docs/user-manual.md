@@ -72,8 +72,10 @@ and so is your environment.
 
 The exit status is the program's own exit status. Two values are special:
 
-- **134**: the program hit a trap (for example an illegal instruction).
-  riscvsim prints the reason, the address and the registers.
+- **134**: the program hit a *trap* (for example an illegal instruction).
+  riscvsim prints its name, cause code and *tval*, for example
+  `illegal instruction (cause 2, tval 0x0) at pc 0x10000`, then the
+  registers.
 - **124**: the instruction limit set by `--fuel` was reached.
 
 ### `riscvsim asm FILE [-o OUT]`

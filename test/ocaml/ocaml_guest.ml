@@ -33,8 +33,7 @@ let sim_run bytecode =
       match Cpu.run ~fuel:5_000_000_000 os.cpu with
       | Cpu.Exited c -> (Buffer.contents buf, c)
       | Cpu.Trapped { trap; pc } ->
-          ( Buffer.contents buf
-            ^ Format.asprintf "<%a at 0x%Lx>" Cpu.pp_trap trap pc,
+          ( Buffer.contents buf ^ Format.asprintf "<%a at 0x%Lx>" Trap.pp trap pc,
             -1 )
       | Cpu.Out_of_fuel -> (Buffer.contents buf ^ "<out of fuel>", -1))
 

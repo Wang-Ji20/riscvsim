@@ -46,7 +46,7 @@ let run_source ?rvc ?fuel src = run_image ?fuel (assemble ?rvc src)
 let pp_outcome = function
   | Cpu.Exited c -> Printf.sprintf "exit %d" c
   | Cpu.Trapped { trap; pc } ->
-      Format.asprintf "trap %a at 0x%Lx" Cpu.pp_trap trap pc
+      Format.asprintf "trap %a at 0x%Lx" Trap.pp trap pc
   | Cpu.Out_of_fuel -> "out of fuel"
 
 let encode_exn i =
@@ -378,6 +378,47 @@ let prop_fpu_fast_paths =
       && same_approx (Fpu.div a b) (Fpu.div_exact a b)
       && same_approx (Fpu.sqrt (Float.abs a)) (Fpu.sqrt_exact (Float.abs a)))
 
+(* Everything a trapping instruction must leave unchanged. All-zero pages
+   are dropped: allocating one isn't visible. *)
+let arch_state (cpu : Cpu.t) =
+  let sorted tbl f =
+    List.sort compare (Hashtbl.fold (fun k v acc -> f k v @ acc) tbl [])
+  in
+  let zero_page = Bytes.make Memory.page_size '\000' in
+  ( (Bytes.copy cpu.x, Bytes.copy cpu.f, Cpu.pc cpu, cpu.instret),
+    (cpu.fflags, cpu.frm, cpu.reservation),
+    sorted cpu.mcsrs (fun k v -> [ (k, v) ]),
+    sorted cpu.mem.pages (fun n (p : Memory.page) ->
+        if Bytes.equal p.bytes zero_page then [] else [ (n, Bytes.copy p.bytes) ]) )
+
+let prop_precise_traps =
+  let reg_value =
+    G.oneof [ int64_interesting; G.map (fun n -> Int64.of_int (0x20000 + n)) (G.int_range 0 64) ]
+  in
+  let gen =
+    let+ i = Gen_instr.instr ()
+    and+ regs = G.array_size (G.return 32) reg_value
+    and+ fregs = G.array_size (G.return 32) double_bits
+    and+ frm = G.int_range 0 7
+    and+ reserved = G.bool in
+    (i, regs, fregs, frm, reserved)
+  in
+  T.make ~name:"a trapping instruction changes no architectural state" ~count:5000
+    ~print:(fun (i, _, _, frm, _) -> Printf.sprintf "%s (frm=%d)" (Instr.to_string i) frm)
+    gen (fun (i, regs, fregs, frm, reserved) ->
+      let cpu = Cpu.create () in
+      Array.iteri (Cpu.set_x cpu) regs;
+      Array.iteri (Cpu.set_f cpu) fregs;
+      Cpu.set_pc cpu 0x10000L;
+      cpu.frm <- frm;
+      if reserved then cpu.reservation <- Some (Cpu.get_x cpu 10);
+      Memory.store cpu.mem 0x20000L 8 0x1122334455667788L;
+      let before = arch_state cpu in
+      match Cpu.execute cpu i ~len:4 ~bits:(encode_exn i) with
+      | () -> true
+      | exception Trap.Trap _ -> arch_state cpu = before)
+  [@@ocamlformat "disable"]
+
 let prop_fma_exact =
   let operand bits lo hi =
     G.pair (G.int_range (-(1 lsl bits)) (1 lsl bits)) (G.int_range lo hi)
@@ -542,7 +583,7 @@ let prop_profile =
          = List.map (fun (_, e) -> e.Stats.count) hot)
 
 let properties =
-  [ prop_profile; prop_fpu_fast_paths; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
+  [ prop_profile; prop_fpu_fast_paths; prop_precise_traps; prop_encode_decode; prop_decode_strict; prop_compress_sound; prop_asm_roundtrip; prop_li; prop_mulh;
     prop_div; prop_word_ops; prop_zbb; prop_memory; prop_fp_rne; prop_fp_directed; prop_fma_exact; prop_fp_single;
     prop_fp_convert; prop_shortest_float; prop_rvc_programs ] [@ocamlformat "disable"]
 
@@ -714,22 +755,22 @@ let test_semantics () =
   let _, outcome, _ = run_source ".word 0" in
   check "all-zero word is an illegal instruction"
     (match outcome with
-    | Cpu.Trapped { trap = Illegal_instruction 0; pc = 0x10000L } -> true
+    | Cpu.Trapped { trap = { cause = Illegal_instruction; tval = 0L }; pc = 0x10000L } -> true
     | _ -> false);
   let _, outcome, _ = run_source "ebreak" in
   check "ebreak traps"
     (match outcome with
-    | Cpu.Trapped { trap = Breakpoint; _ } -> true
+    | Cpu.Trapped { trap = { cause = Breakpoint; tval = 0x10000L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "li a0, 0x20001\namoadd.w a1, a1, (a0)" in
   check "misaligned AMO traps"
     (match outcome with
-    | Cpu.Trapped { trap = Misaligned_atomic 0x20001L; _ } -> true
+    | Cpu.Trapped { trap = { cause = Store_address_misaligned; tval = 0x20001L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "csrr a0, 0x7c0" in
   check "unknown CSR traps"
     (match outcome with
-    | Cpu.Trapped { trap = Unknown_csr 0x7c0; _ } -> true
+    | Cpu.Trapped { trap = { cause = Illegal_instruction; tval = 0x7c002573L }; _ } -> true
     | _ -> false);
   let _, outcome, _ = run_source "loop: j loop" ~fuel:1000 in
   check "fuel limit" (outcome = Cpu.Out_of_fuel);

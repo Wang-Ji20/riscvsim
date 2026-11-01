@@ -134,6 +134,13 @@ one with the `ecall` instruction.
 and the next one. "Off by one ulp" means the result is the neighbouring
 representable number.
 
+**Trap.** An event that stops an instruction from completing normally
+and hands control elsewhere: an illegal instruction, a misaligned atomic
+access, `ebreak`, `ecall`, and later page faults. Each kind has a number,
+the *cause*, and a value, *tval*, that says more (the bad address, or the
+bits of the illegal instruction). A trapping instruction changes nothing:
+registers, memory and the program counter are as they were before it.
+
 **User mode.** The restricted mode ordinary programs run in. riscvsim
 currently simulates only user mode and handles the operating system's
 part (syscalls) itself, as `qemu-user` does.

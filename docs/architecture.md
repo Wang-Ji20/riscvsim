@@ -53,6 +53,8 @@ The parts, from the bottom up:
 - **`Decode_cache`** remembers decoded instructions per memory page, so
   each one is decoded once. A write to a cached page throws that page's
   entries away (see [instructions](design/instructions.md)).
+- **`Trap`** lists the RISC-V *traps* (see the glossary) with their
+  cause codes. The CPU raises them as an OCaml exception.
 - **`Fpu`** computes floating-point results exactly as the IEEE 754
   standard requires, including all rounding modes and exception flags.
 - **`Cpu`** holds the processor state (32 integer registers, 32 FP

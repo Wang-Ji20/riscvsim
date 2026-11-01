@@ -37,6 +37,8 @@ far it has always been riscvsim.
   - rounding modes bracket the exact result,
   - random programs give identical results with and without
     compression.
+  - an instruction that traps changes no architectural state,
+  - the FPU's fast paths agree with its exact (slow) paths.
 
   When a property fails, QCheck *shrinks* the input to a minimal example.
   The first real bug found this way shrank to the single instruction

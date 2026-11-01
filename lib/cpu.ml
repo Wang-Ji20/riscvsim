@@ -3,23 +3,8 @@
 
 open Instr
 
-type trap =
-  | Illegal_instruction of int  (** raw bits *)
-  | Breakpoint
-  | Misaligned_atomic of int64
-  | Unknown_csr of int
-  | Unhandled_ecall
-
-exception Trap of trap
-
-let pp_trap ppf = function
-  | Illegal_instruction bits ->
-      Format.fprintf ppf "illegal instruction 0x%08x" bits
-  | Breakpoint -> Format.pp_print_string ppf "breakpoint (ebreak)"
-  | Misaligned_atomic a ->
-      Format.fprintf ppf "misaligned atomic access at 0x%Lx" a
-  | Unknown_csr c -> Format.fprintf ppf "access to unimplemented CSR 0x%03x" c
-  | Unhandled_ecall -> Format.pp_print_string ppf "ecall with no environment"
+(** Raise an illegal-instruction trap; [tval] holds the instruction bits. *)
+let illegal bits = Trap.raise_trap Illegal_instruction (Int64.of_int bits)
 
 (* Registers live in [Bytes] rather than an [int64 array]: an array stores
    each int64 as a separate heap block, so every register write allocated.
@@ -54,7 +39,7 @@ let create () =
     instret = 0;
     reservation = None;
     exit_code = None;
-    ecall = (fun _ -> raise (Trap Unhandled_ecall));
+    ecall = (fun _ -> Trap.raise_trap Ecall_from_u 0L);
     mcsrs = Hashtbl.create 16;
   }
 
@@ -319,7 +304,8 @@ let store_size = function Sb -> 1 | Sh -> 2 | Sw -> 4 | Sd -> 8
 
 (* {1 CSRs} *)
 
-let csr_read t csr =
+(* An unimplemented CSR is an illegal instruction, as on hardware. *)
+let csr_read t ~bits csr =
   match csr with
   | 0x001 -> Int64.of_int t.fflags
   | 0x002 -> Int64.of_int t.frm
@@ -330,9 +316,9 @@ let csr_read t csr =
   | 0xf11 | 0xf12 | 0xf13 | 0xf14 (* vendor/arch/impl ids, hart id *) -> 0L
   | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
       Option.value ~default:0L (Hashtbl.find_opt t.mcsrs csr)
-  | _ -> raise (Trap (Unknown_csr csr))
+  | _ -> illegal bits
 
-let csr_write t csr v64 =
+let csr_write t ~bits csr v64 =
   let v = Int64.to_int v64 in
   match csr with
   | 0x001 -> t.fflags <- v land 0x1f
@@ -343,7 +329,7 @@ let csr_write t csr v64 =
   | 0x301 -> () (* misa is WARL; writes ignored *)
   | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
       Hashtbl.replace t.mcsrs csr v64
-  | _ -> raise (Trap (Unknown_csr csr))
+  | _ -> illegal bits
 (* counters are read-only *)
 
 (* {1 Floating point} *)
@@ -358,9 +344,7 @@ let rm_of t = function
 (** Run a format-generic FP operation on the registers of [fmt]. *)
 let fp_exec t ~bits (i : Instr.t) =
   let resolve rm =
-    match rm_of t rm with
-    | Some rm -> rm
-    | None -> raise (Trap (Illegal_instruction bits))
+    match rm_of t rm with Some rm -> rm | None -> illegal bits
   in
   let flag (v, fl) =
     t.fflags <- t.fflags lor fl;
@@ -432,7 +416,9 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
   let addr = get t rs1 in
   let size = match width with Word -> 4 | Dword -> 8 in
   if Int64.to_int addr land (size - 1) <> 0 then
-    raise (Trap (Misaligned_atomic addr));
+    Trap.raise_trap
+      (if op = Lr then Load_address_misaligned else Store_address_misaligned)
+      addr;
   let norm = match width with Word -> sext32 | Dword -> Fun.id in
   let unsigned = match width with Word -> zext32 | Dword -> Fun.id in
   match op with
@@ -489,7 +475,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
   | Unary { op; rd; rs1 } -> set t rd (unary op (get t rs1))
   | Fence _ | Fence_i -> () (* the decode cache is always coherent *)
   | Ecall -> t.ecall t
-  | Ebreak -> raise (Trap Breakpoint)
+  | Ebreak -> Trap.raise_trap Breakpoint pc
   | Csr { op; rd; src; csr } ->
       let v, writes =
         match src with
@@ -497,7 +483,9 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
         | Uimm u -> (Int64.of_int u, u <> 0 || op = Csrrw)
       in
       (* csrrw with rd = zero must not read (no read side effects) *)
-      let old = if op = Csrrw && (rd :> int) = 0 then 0L else csr_read t csr in
+      let old =
+        if op = Csrrw && (rd :> int) = 0 then 0L else csr_read t ~bits csr
+      in
       (if writes then
          let nv =
            match op with
@@ -505,7 +493,7 @@ let execute_straight t (i : Instr.t) ~pc ~bits =
            | Csrrs -> Int64.logor old v
            | Csrrc -> Int64.logand old (Int64.lognot v)
          in
-         csr_write t csr nv);
+         csr_write t ~bits csr nv);
       set t rd old
   | Amo { op; width; rd; rs1; rs2; _ } -> amo t ~op ~width ~rd ~rs1 ~rs2
   | Fload { fmt = D; rd; rs1; offset } ->
@@ -549,15 +537,14 @@ let step ?trace t =
   let pc = pc t in
   let page = Memory.page_no pc and off = Memory.offset pc in
   match Decode_cache.fetch t.decoded t.mem ~page ~off with
-  | exception Decode_cache.Illegal bits ->
-      raise (Trap (Illegal_instruction bits))
+  | exception Decode_cache.Illegal bits -> illegal bits
   | { instr; len; bits } ->
       (match trace with Some f -> f pc instr | None -> ());
       execute t instr ~len ~bits
 
 type outcome =
   | Exited of int
-  | Trapped of { trap : trap; pc : int64 }
+  | Trapped of { trap : Trap.t; pc : int64 }
   | Out_of_fuel
 
 (** Run until the program exits, traps, or executes [fuel] instructions. *)
@@ -569,6 +556,6 @@ let run ?(fuel = max_int) ?trace t =
     | None -> (
         match step ?trace t with
         | () -> loop (n + 1)
-        | exception Trap trap -> Trapped { trap; pc = pc t })
+        | exception Trap.Trap trap -> Trapped { trap; pc = pc t })
   in
   loop 0

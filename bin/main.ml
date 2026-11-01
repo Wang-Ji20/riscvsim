@@ -89,7 +89,7 @@ let run path args rvc trace regs fuel strace signature stats profile =
       match outcome with
       | Exited code -> code
       | Trapped { trap; pc } ->
-          Format.eprintf "riscvsim: %a at pc 0x%Lx@." Cpu.pp_trap trap pc;
+          Format.eprintf "riscvsim: %a at pc 0x%Lx@." Trap.pp trap pc;
           if not regs then dump_regs cpu;
           134
       | Out_of_fuel ->
