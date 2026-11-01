@@ -55,6 +55,8 @@ The parts, from the bottom up:
   to and from bits: 32-bit instructions, and the 16-bit compressed ones.
 - **`Memory`** is the simulated memory: a sparse 64-bit address space,
   allocated in 4 KiB pages on first write.
+- **`Machine`** groups harts, their shared bus and a virtual clock, and
+  runs the harts in turn. `Os` uses a machine with one hart.
 - **`Bus`** connects the hart to RAM and to memory-mapped *devices*
   (`Device`). In user mode all addresses are RAM; in system mode other
   addresses fault (see [the bus](design/system-bus.md)).

@@ -1,8 +1,8 @@
-# Design: the bus, devices and traps
+# Design: the machine, bus, devices and traps
 
 This document covers the parts that prepare riscvsim to simulate a whole
 computer rather than one Linux process (roadmap Phase 1). Modules:
-`Trap`, `Bus`, `Device`.
+`Machine`, `Trap`, `Bus`, `Device`.
 
 ## User mode and system mode
 
@@ -53,6 +53,40 @@ boolean (`all_ram`). In system mode it is one range comparison. Devices
 all sit below RAM, so an address is compared with the device table only
 when it lies below `mmio_limit`. A lookup structure for devices would
 make device accesses faster, but they are rare compared to RAM accesses.
+
+## The machine
+
+`Machine` puts the pieces together: one or more harts, the bus they
+share, and a *virtual clock*.
+
+```
+            Machine (now = instructions executed so far)
+   +--------+  +--------+
+   | hart 0 |  | hart 1 |  ...      each with its own registers,
+   +--------+  +--------+           pc and decode cache
+        \          /
+     +------------------+
+     |       Bus        |---- devices, ticked after each round
+     +------------------+
+```
+
+`Machine.run` lets each hart run a *slice* of instructions (10,000 by
+default) in turn. After each round it ticks every device with the
+current time and asks an optional `poll` function whether to stop
+(`Os` uses that to notice HTIF exits). The run ends when a hart exits or
+traps, or the instruction budget (*fuel*) is used up.
+
+Time is the number of instructions executed, not wall-clock time. So a
+run is **deterministic**: the same program does the same thing at the
+same moment every time, which makes long boots replayable when
+debugging.
+
+Running harts in turn, rather than in parallel threads, is also
+deterministic, and simple. Real parallelism (roadmap 8.8) can come later.
+
+Each hart answers the `mhartid` control register with its own number.
+Each also keeps its own decode cache, and a write to code invalidates
+every hart's cache, not only the writer's.
 
 ## Devices
 

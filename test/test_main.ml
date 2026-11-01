@@ -823,6 +823,58 @@ let test_bus () =
     && Bus.within ~base:(-16L) ~len:16L (-16L) 8
     && not (Bus.within ~base:(-16L) ~len:16L 0L 1))
 
+(* Records the time of every tick. *)
+module Tick_log = struct
+  type t = int list ref
+
+  let name = "tick-log"
+  let size = 8L
+  let read _ ~offset:_ ~size:_ = 0L
+  let write _ ~offset:_ ~size:_ _ = ()
+  let tick t ~now = t := now :: !t
+end
+
+let test_machine () =
+  section "machine";
+  let load_code bus src =
+    let img = assemble src in
+    List.iter
+      (fun (seg : Image.segment) -> Memory.blit_bytes (Bus.ram bus) seg.vaddr seg.data)
+      img.segments
+  in
+  let m = Machine.create ~harts:2 (Bus.user ()) in
+  load_code m.bus "csrr a1, 0xf14\nloop: addi a0, a0, 1\nj loop";
+  Array.iter (fun h -> Hart.set_pc h 0x10000L) m.harts;
+  let outcome = Machine.run ~fuel:25 ~slice:10 m in
+  check_eq ~pp:pp_outcome "two harts: fuel runs out" Hart.Out_of_fuel outcome;
+  check_eq ~pp:(fun (a, b, c) -> Printf.sprintf "%d %d %d" a b c)
+    "harts take turns in slices: 10 + 10 + 5" (15, 10, 25)
+    ((Machine.hart m 0).instret, (Machine.hart m 1).instret, m.now);
+  check "each hart reads its own mhartid"
+    (Hart.get_x (Machine.hart m 0) 11 = 0L && Hart.get_x (Machine.hart m 1) 11 = 1L);
+  let bus = Bus.system ~ram_base:0x8000_0000L ~ram_size:0x1000L in
+  let log = ref [] in
+  Bus.attach bus ~base:0x1000_0000L (Device.pack (module Tick_log) log);
+  let m = Machine.create bus in
+  Memory.store (Bus.ram bus) 0x8000_0000L 4 0x0000006fL (* j . *);
+  Hart.set_pc (Machine.hart m 0) 0x8000_0000L;
+  ignore (Machine.run ~fuel:30 ~slice:10 m);
+  check_eq ~pp:(fun l -> String.concat "," (List.map string_of_int l))
+    "devices tick after each round, with the virtual time" [ 10; 20; 30 ] (List.rev !log);
+  (* every hart's decode cache sees writes, not just the last one created *)
+  let m = Machine.create ~harts:2 (Bus.user ()) in
+  load_code m.bus "addi a0, a0, 1\nebreak";
+  let h0 = Machine.hart m 0 in
+  Hart.set_pc h0 0x10000L;
+  Hart.step h0;
+  Memory.store (Bus.ram m.bus) 0x10000L 4
+    (Int64.of_int (encode_exn (Op_imm { op = Addi; rd = Reg.a0; rs1 = Reg.a0; imm = 5 })));
+  Hart.set_pc h0 0x10000L;
+  Hart.step h0;
+  check_eq ~pp:Int64.to_string "hart 0 sees code rewritten after hart 1 was created" 6L
+    (Hart.get_x h0 10)
+[@@ocamlformat "disable"]
+
 let test_semantics () =
   section "semantics";
   let regs_after src =
@@ -968,6 +1020,7 @@ let () =
   test_semantics ();
   test_decode_cache ();
   test_bus ();
+  test_machine ();
   test_examples ();
   section "properties (QCheck2)";
   let qcheck_failures =

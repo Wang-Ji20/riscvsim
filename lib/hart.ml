@@ -13,6 +13,7 @@ type t = {
   x : Bytes.t;  (** 32 little-endian int64s; [x0] is never written *)
   f : Bytes.t;  (** 32 raw bit patterns; singles are NaN-boxed *)
   pc_cell : Bytes.t;  (** the program counter, one int64; see {!pc} *)
+  hartid : int;  (** this hart's number, read by the [mhartid] CSR *)
   bus : Bus.t;
   mem : Memory.t;  (** the bus's RAM, which code is fetched from *)
   decoded : Decode_cache.t;
@@ -27,13 +28,19 @@ type t = {
 }
 
 (** A hart on [bus] (by default a user-mode bus: RAM everywhere). *)
-let create ?(bus = Bus.user ()) () =
+let create ?(hartid = 0) ?(bus = Bus.user ()) () =
   let mem = Bus.ram bus and decoded = Decode_cache.create () in
-  mem.on_code_write <- Decode_cache.invalidate decoded;
+  (* harts sharing the bus each keep a decode cache: chain the callbacks *)
+  let others = mem.on_code_write in
+  mem.on_code_write <-
+    (fun n ->
+      others n;
+      Decode_cache.invalidate decoded n);
   {
     x = Bytes.make (32 * 8) '\000';
     f = Bytes.make (32 * 8) '\000';
     pc_cell = Bytes.make 8 '\000';
+    hartid;
     bus;
     mem;
     decoded;
@@ -316,7 +323,8 @@ let csr_read t ~bits csr =
   | 0xc00 | 0xc01 | 0xc02 -> Int64.of_int t.instret (* cycle = time *)
   | 0x301 (* misa: RV64 IMAFDC + U *) ->
       Int64.(logor (shift_left 2L 62) (of_int 0x10112d))
-  | 0xf11 | 0xf12 | 0xf13 | 0xf14 (* vendor/arch/impl ids, hart id *) -> 0L
+  | 0xf11 | 0xf12 | 0xf13 (* vendor, architecture, implementation ids *) -> 0L
+  | 0xf14 -> Int64.of_int t.hartid
   | 0x300 | 0x304 | 0x305 | 0x340 | 0x341 | 0x342 | 0x343 | 0x344 ->
       Option.value ~default:0L (Hashtbl.find_opt t.mcsrs csr)
   | _ -> illegal bits

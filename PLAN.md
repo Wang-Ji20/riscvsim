@@ -199,6 +199,6 @@ docs/perf targets say Phases 1-5 need far less).
 - [x] 1b. Rename `Cpu` to `Hart`
 - [x] 1c. `Bus`: RAM and device regions, access faults, checked multi-byte
       stores; `Device.S` and `Device.pack`
-- [ ] 1d. `Machine`: harts, bus, devices, virtual clock
+- [x] 1d. `Machine`: harts, bus, devices, virtual clock; `mhartid`
 - [ ] 1e. Pluggable environment: Linux emulation or `ecall` as a trap
 - [ ] 1f. Snapshots

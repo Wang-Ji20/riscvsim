@@ -44,6 +44,7 @@ let buffer_io ?(input = "") buf =
 type file = Stdin | Stdout | Stderr | Host of Unix.file_descr
 
 type t = {
+  machine : Machine.t;  (** one hart on a user-mode bus *)
   hart : Hart.t;
   io : io;
   fds : (int, file) Hashtbl.t;
@@ -684,7 +685,8 @@ let syscall t =
 (** Create a CPU running [img] as a Linux process. *)
 let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     (img : Image.t) =
-  let hart = Hart.create () in
+  let machine = Machine.create (Bus.user ()) in
+  let hart = Machine.hart machine 0 in
   Hart.load hart img;
   setup_stack hart img ~argv ~env;
   let brk = page_align (Image.end_address img) in
@@ -694,6 +696,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     [ (0, Stdin); (1, Stdout); (2, Stderr) ];
   let t =
     {
+      machine;
       hart;
       io;
       fds;
@@ -722,21 +725,11 @@ let htif_exit t =
         Some (Int64.to_int (Int64.shift_right_logical v 1) land 0xff)
       else None)
 
-(** Like {!Hart.run}, but also honours HTIF exits. Like Spike, it polls [tohost]
-    between slices of instructions rather than on every store. *)
-let run ?(fuel = max_int) ?trace t =
-  let slice = 10_000 in
-  let rec loop remaining =
-    match Hart.run ~fuel:(min slice remaining) ?trace t.hart with
-    | Hart.Out_of_fuel -> (
-        match htif_exit t with
-        | Some code -> Hart.Exited code
-        | None ->
-            if remaining > slice then loop (remaining - slice)
-            else Hart.Out_of_fuel)
-    | outcome -> outcome
-  in
-  if t.tohost = None then Hart.run ~fuel ?trace t.hart else loop fuel
+(** Run the process until it exits, traps or uses up [fuel]. HTIF exits are
+    honoured too: like Spike, [tohost] is polled between slices of instructions
+    rather than on every store. *)
+let run ?fuel ?trace t =
+  Machine.run ?fuel ?trace ~poll:(fun () -> htif_exit t) t.machine
 
 (** The words between [begin_signature] and [end_signature], one per line as 8
     hex digits: the riscv-arch-test signature format. *)

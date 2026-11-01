@@ -40,7 +40,7 @@ testable. A step marked ✅ is done in the user-mode simulator.
 
 ## Phase 1: Architecture refactor for system mode
 
-1.1 Split `Cpu` into `Hart` (architectural state) and `Machine` (harts, bus,
+1.1 ✅ Split `Cpu` into `Hart` (architectural state) and `Machine` (harts, bus,
     devices, clock).
 1.2 ✅ Introduce a `Bus` interface with `load/store : addr -> size -> ...`, and
     route RAM and MMIO through it with a region table, so devices are
