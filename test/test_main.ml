@@ -976,6 +976,13 @@ let test_machine () =
     (sc_result ~other_store:(`Other 0x20040L));
   check_eq ~pp:Int64.to_string "the hart's own store leaves its reservation" 0L
     (sc_result ~other_store:`Own);
+  (* a hart stuck in a trap loop: mtvec = 0 holds an illegal instruction.
+     Delivered traps retire nothing, so fuel must count steps, not instret. *)
+  let m = Machine.create (Bus.user ()) in
+  (Machine.hart m 0).env <- System;
+  check_eq ~pp:pp_outcome "fuel runs out even when every step traps" Hart.Out_of_fuel
+    (Machine.run ~fuel:100 ~slice:30 m);
+  check_eq ~pp:string_of_int "... after exactly the given number of steps" 100 m.now;
   let m = Machine.create (Bus.user ()) in
   load_code m.bus "ecall";
   Hart.set_pc (Machine.hart m 0) 0x10000L;
@@ -983,6 +990,20 @@ let test_machine () =
     (Hart.Trapped { trap = { cause = Ecall_from_m; tval = 0L }; pc = 0x10000L })
     (Machine.run ~fuel:10 m)
 [@@ocamlformat "disable"]
+
+(* Run [src] on one hart that delivers traps to its own handlers, until it
+   settles in a [spin: j spin] loop. *)
+let run_system_program src =
+  let img = assemble src in
+  let m = Machine.create (Bus.user ()) in
+  List.iter
+    (fun (seg : Image.segment) -> Memory.blit_bytes (Bus.ram m.bus) seg.vaddr seg.data)
+    img.segments;
+  let hart = Machine.hart m 0 in
+  hart.env <- System;
+  Hart.set_pc hart img.entry;
+  ignore (Machine.run ~fuel:200 m);
+  (hart, fun name -> List.assoc name img.symbols)
 
 let test_csr_file () =
   section "privileged CSRs";
@@ -1016,7 +1037,7 @@ let test_csr_file () =
   check "... both enable U" (allowed U Csr.cycle ~write:false);
   t.mstatus <- Int64.logor t.mstatus C.tvm_bit;
   check "TVM forbids satp in S-mode" (not (allowed S Csr.satp ~write:false));
-  let _, _, hart = run_source "li t0, 100\ncsrw minstret, t0\ncsrr a0, minstret\nebreak" in
+  let hart, _ = run_system_program "li t0, 100\ncsrw minstret, t0\ncsrr a0, minstret\nspin: j spin" in
   check_eq ~pp:Int64.to_string "the next instruction reads the minstret just written" 100L
     (Hart.get_x hart 10);
   let _, _, hart = run_source "fadd.d ft0, ft0, ft0\nebreak" in
@@ -1076,20 +1097,6 @@ let test_csr_file () =
   let outcome, hart = run_priv S Wfi in
   check "wfi in S-mode is a nop" (outcome = Hart.Out_of_fuel && Hart.pc hart = 0x10004L)
 [@@ocamlformat "disable"]
-
-(* Run [src] on one hart that delivers traps to its own handlers, until it
-   settles in a [spin: j spin] loop. *)
-let run_system_program src =
-  let img = assemble src in
-  let m = Machine.create (Bus.user ()) in
-  List.iter
-    (fun (seg : Image.segment) -> Memory.blit_bytes (Bus.ram m.bus) seg.vaddr seg.data)
-    img.segments;
-  let hart = Machine.hart m 0 in
-  hart.env <- System;
-  Hart.set_pc hart img.entry;
-  ignore (Machine.run ~fuel:200 m);
-  (hart, fun name -> List.assoc name img.symbols)
 
 let test_traps () =
   section "trap delivery";

@@ -131,22 +131,11 @@ let run_process image =
   let os = Os.boot ~io:(Os.buffer_io (Buffer.create 64)) image in
   (os.hart, Os.run ~fuel os)
 
-(** Boot a bare-metal image on one hart in M-mode, with RAM at 0x80000000,
-    traps delivered to the program, and HTIF exits. *)
-let run_machine (image : Image.t) =
-  let bus = Bus.system ~ram_base:0x8000_0000L ~ram_size:0x400_0000L in
-  let m = Machine.create bus in
-  let hart = Machine.hart m 0 in
-  hart.env <- System;
-  Hart.load hart image;
-  let poll () = Option.bind (Htif.tohost image) (fun tohost -> Htif.exit_code (Bus.ram bus) ~tohost) in
-  (hart, Machine.run ~fuel ~poll m)
-
 let simulate t elf =
   match Elf.read (In_channel.with_open_bin elf In_channel.input_all) with
   | Error e -> Error e
   | Ok { image; _ } ->
-      let hart, outcome = match t.mode with User_process -> run_process image | System_machine -> run_machine image in
+      let hart, outcome = match t.mode with User_process -> run_process image | System_machine -> Bare_metal.run ~fuel image in
       Ok (image, hart, outcome)
 
 let check t elf =
@@ -157,7 +146,7 @@ let check t elf =
       | Exit_zero, Hart.Exited 0 -> Pass
       | Exit_zero, Hart.Exited n -> Fail (Printf.sprintf "test case %d failed" n)
       | Signature ref, Hart.Exited 0 -> (
-          match Os.signature hart image with
+          match Bare_metal.signature hart image with
           | Some s when s = In_channel.with_open_bin ref In_channel.input_all -> Pass
           | Some _ -> Fail "signature differs from the reference"
           | None -> Fail "no signature symbols")

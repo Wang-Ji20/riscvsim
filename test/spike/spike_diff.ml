@@ -224,11 +224,12 @@ let on_riscvsim elf =
   match Elf.read (read_file elf) with
   | Error e -> Error e
   | Ok { image; _ } -> (
-      let os = Os.boot ~io:(Os.buffer_io (Buffer.create 16)) image in
-      match Os.run ~fuel:10_000_000 os with
-      | Hart.Exited 0 ->
-          Option.to_result ~none:"no signature" (Os.signature os.hart image)
-      | Hart.Trapped { trap; pc } ->
+      (* Bare: a trap is a bug here, so report it rather than deliver it *)
+      match Bare_metal.run ~env:Bare ~fuel:10_000_000 image with
+      | hart, Hart.Exited 0 ->
+          Option.to_result ~none:"no signature"
+            (Bare_metal.signature hart image)
+      | _, Hart.Trapped { trap; pc } ->
           Error (Format.asprintf "%a at 0x%Lx" Trap.pp trap pc)
       | _ -> Error "did not halt")
 

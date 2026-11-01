@@ -69,6 +69,7 @@ and so is your environment.
 | `--signature FILE` | After the run, save the test *signature* to FILE |
 | `--stats` | Print the instruction count, time, speed (*MIPS*) and allocation |
 | `--profile` | Print the most executed mnemonics and instructions (slower) |
+| `--bare-metal` | Run as Spike does: M-mode, RAM at `0x8000_0000`, traps go to the program's handlers, exit through HTIF |
 
 The exit status is the program's own exit status. Two values are special:
 

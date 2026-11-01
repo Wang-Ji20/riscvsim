@@ -221,6 +221,9 @@ Phase 1 is complete.
       rv64u*, rv64mi, rv64si; 3 skipped for interrupts and Sv39) and
       arch-test in M-mode (266/267, now including cebreak-01); `Htif`
       module; debug trigger CSRs hardwired to zero
-- [ ] 2f. `Os` processes run in U-mode
+- [x] 2f. `Os` processes run in U-mode (counters enabled); `Bare_metal`
+      module and `riscvsim run --bare-metal`; fixed `Machine.run` fuel
+      accounting, which looped forever when traps or minstret writes kept
+      instret from advancing
 - [ ] 2g. Interrupts
 - [ ] 2h. PMP

@@ -635,12 +635,15 @@ type outcome =
   | Trapped of { trap : Trap.t; pc : int64 }
   | Out_of_fuel
 
-(** Run until the program exits, traps, or executes [fuel] instructions. *)
-let run ?(fuel = max_int) ?trace t =
+(** Run until the program exits, traps, or takes [fuel] steps. Returns the
+    outcome and the number of steps taken. A step is an executed instruction or
+    a trap delivered to the guest, so this count, unlike [instret], always
+    advances and can't be changed by the program. *)
+let run_steps ?(fuel = max_int) ?trace t =
   let rec loop n =
     match t.exit_code with
-    | Some code -> Exited code
-    | None when n >= fuel -> Out_of_fuel
+    | Some code -> (Exited code, n)
+    | None when n >= fuel -> (Out_of_fuel, n)
     | None -> (
         match step_or_raise ?trace t with
         | () -> loop (n + 1)
@@ -648,6 +651,9 @@ let run ?(fuel = max_int) ?trace t =
             if delivers_traps t then (
               deliver t trap;
               loop (n + 1))
-            else Trapped { trap; pc = pc t })
+            else (Trapped { trap; pc = pc t }, n))
   in
   loop 0
+
+(** Run until the program exits, traps, or takes [fuel] steps. *)
+let run ?fuel ?trace t = fst (run_steps ?fuel ?trace t)

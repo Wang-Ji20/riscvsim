@@ -48,20 +48,31 @@ let combine_hooks hooks =
   | [ h ] -> Some h
   | hs -> Some (fun pc i -> List.iter (fun h -> h pc i) hs)
 
-let run path args rvc trace regs fuel strace signature stats profile =
+(** The hart to run [img] on, and how to run it: as a Linux process, or
+    bare-metal in M-mode as Spike would. *)
+let start ~bare_metal ~path ~args ~strace img =
+  if bare_metal then
+    let m = Bare_metal.boot img in
+    ( Machine.hart m 0,
+      fun ?fuel ?trace () -> Bare_metal.continue ?fuel ?trace m img )
+  else
+    let os =
+      Os.boot ~argv:(path :: args)
+        ~env:(Array.to_list (Unix.environment ()))
+        ~exe:(Filename.concat (Sys.getcwd ()) path)
+        ?strace:(if strace then Some prerr_string else None)
+        img
+    in
+    (os.hart, fun ?fuel ?trace () -> Os.run ?fuel ?trace os)
+
+let run path args rvc trace regs fuel strace signature stats profile bare_metal
+    =
   match load_image ~rvc path with
   | Error e ->
       prerr_endline e;
       1
   | Ok img -> (
-      let os =
-        Os.boot ~argv:(path :: args)
-          ~env:(Array.to_list (Unix.environment ()))
-          ~exe:(Filename.concat (Sys.getcwd ()) path)
-          ?strace:(if strace then Some prerr_string else None)
-          img
-      in
-      let hart = os.hart in
+      let hart, go = start ~bare_metal ~path ~args ~strace img in
       let trace =
         if trace then
           Some
@@ -73,14 +84,14 @@ let run path args rvc trace regs fuel strace signature stats profile =
       let prof = if profile then Some (Stats.create_profile ()) else None in
       let hook = combine_hooks [ trace; Option.map Stats.record prof ] in
       let before = Stats.sample hart.instret in
-      let outcome = Os.run ?fuel ?trace:hook os in
+      let outcome = go ?fuel ?trace:hook () in
       let summary = Stats.diff before (Stats.sample hart.instret) in
       if stats then Format.eprintf "%a%!" Stats.pp_summary summary;
       Option.iter (Format.eprintf "%a%!" (Stats.pp_profile ?top:None)) prof;
       if regs then dump_regs hart;
       Option.iter
         (fun file ->
-          match Os.signature hart img with
+          match Bare_metal.signature hart img with
           | Some s ->
               Out_channel.with_open_bin file (fun oc -> output_string oc s)
           | None ->
@@ -182,12 +193,24 @@ let run_cmd =
             "Count executions per instruction and print the most executed \
              mnemonics and addresses to stderr. Slows the run down.")
   in
+  let bare_metal =
+    Arg.(
+      value & flag
+      & info [ "bare-metal" ]
+          ~doc:
+            "Run the program bare-metal, as Spike does: in M-mode with RAM at \
+             0x80000000, traps delivered to the program's handlers, and exit \
+             through HTIF ($(b,tohost)). For test suites and programs built \
+             for Spike.")
+  in
   Cmd.v
     (Cmd.info "run"
-       ~doc:"Assemble (if needed) and run a program as a Linux process.")
+       ~doc:
+         "Assemble (if needed) and run a program as a Linux process, or \
+          bare-metal.")
     Term.(
       const run $ file $ args $ rvc $ trace $ regs $ fuel $ strace $ signature
-      $ stats $ profile)
+      $ stats $ profile $ bare_metal)
 
 let asm_cmd =
   let output =

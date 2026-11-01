@@ -687,7 +687,12 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
     (img : Image.t) =
   let machine = Machine.create (Bus.user ()) in
   let hart = Machine.hart machine 0 in
-  Csr_file.set_fs hart.csrs 1 (* Linux starts processes with FS = Initial *);
+  (* A Linux process runs in U-mode with the FPU usable (FS = Initial) and
+     may read cycle, time and instret. *)
+  hart.csrs.priv <- U;
+  Csr_file.set_fs hart.csrs 1;
+  hart.csrs.mcounteren <- 7L;
+  hart.csrs.scounteren <- 7L;
   Hart.load hart img;
   setup_stack hart img ~argv ~env;
   let brk = page_align (Image.end_address img) in
@@ -725,22 +730,3 @@ let htif_exit t =
     rather than on every store. *)
 let run ?fuel ?trace t =
   Machine.run ?fuel ?trace ~poll:(fun () -> htif_exit t) t.machine
-
-(** The words between [begin_signature] and [end_signature], one per line as 8
-    hex digits: the riscv-arch-test signature format. *)
-let signature (hart : Hart.t) (img : Image.t) =
-  match
-    ( List.assoc_opt "begin_signature" img.symbols,
-      List.assoc_opt "end_signature" img.symbols )
-  with
-  | Some b, Some e ->
-      let buf = Buffer.create 4096 in
-      let rec go a =
-        if Int64.compare a e < 0 then (
-          Buffer.add_string buf
-            (Printf.sprintf "%08Lx\n" (Memory.load hart.mem a 4));
-          go (Int64.add a 4L))
-      in
-      go b;
-      Some (Buffer.contents buf)
-  | _ -> None
