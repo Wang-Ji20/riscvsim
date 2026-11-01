@@ -239,6 +239,10 @@ let read t n =
   | 0x343 -> some t.mtval
   | 0x344 -> some t.mip
   | _ when n >= 0x323 && n <= 0x33f -> some 0L (* mhpmevent3-31 *)
+  | 0x7a0 | 0x7a1 | 0x7a2 | 0x7a3 ->
+      (* debug triggers (Sdtrig): none. tselect/tdata read as zero and ignore
+         writes, which tells software there is no trigger to configure. *)
+      some 0L
   | _ when n >= 0xb03 && n <= 0xb1f -> some 0L (* mhpmcounter3-31 *)
   | _ when n >= 0xc03 && n <= 0xc1f -> some 0L (* hpmcounter3-31 *)
   | _ when n >= Csr.pmpcfg0 && n < Csr.pmpcfg0 + 16 ->

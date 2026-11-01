@@ -76,7 +76,8 @@ testable. A step marked ✅ is done in the user-mode simulator.
 2.7 ✅ Counters: `cycle`, `time`, `instret`, plus `mcounteren` gating.
 2.8 PMP: `pmpcfg0..15`, `pmpaddr0..63`. Implement at least TOR/NAPOT,
     because OpenSBI programs them.
-2.9 Pass `rv64mi-p-*` and `rv64si-p-*` from riscv-tests.
+2.9 Pass `rv64mi-p-*` and `rv64si-p-*` from riscv-tests. All pass except
+    `rv64mi-illegal` (needs interrupts) and two `rv64si` tests that need Sv39.
 
 ## Phase 3: Virtual memory (Sv39, then Sv48)
 

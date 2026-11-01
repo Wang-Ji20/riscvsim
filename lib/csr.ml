@@ -48,6 +48,10 @@ let mtval = 0x343
 let mip = 0x344
 let pmpcfg0 = 0x3a0
 let pmpaddr0 = 0x3b0
+let tselect = 0x7a0
+let tdata1 = 0x7a1
+let tdata2 = 0x7a2
+let tdata3 = 0x7a3
 let mcycle = 0xb00
 let minstret = 0xb02
 
@@ -68,7 +72,8 @@ let table =
     (misa, "misa"); (medeleg, "medeleg"); (mideleg, "mideleg"); (mie, "mie");
     (mtvec, "mtvec"); (mcounteren, "mcounteren"); (menvcfg, "menvcfg");
     (mcountinhibit, "mcountinhibit"); (mscratch, "mscratch"); (mepc, "mepc");
-    (mcause, "mcause"); (mtval, "mtval"); (mip, "mip"); (mcycle, "mcycle");
+    (mcause, "mcause"); (mtval, "mtval"); (mip, "mip"); (tselect, "tselect");
+    (tdata1, "tdata1"); (tdata2, "tdata2"); (tdata3, "tdata3"); (mcycle, "mcycle");
     (minstret, "minstret") ]
   @ range 0xc03 3 31 "hpmcounter"
   @ range 0xb03 3 31 "mhpmcounter"

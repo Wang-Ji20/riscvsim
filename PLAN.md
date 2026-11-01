@@ -217,7 +217,10 @@ Phase 1 is complete.
       wrong-mode checks)
 - [x] 2d. Trap delivery (`System` environment), delegation, vectored tvec;
       ecall reports the current privilege
-- [ ] 2e. Conformance in system mode: stock `p` env, rv64mi/si, arch-test in M-mode
+- [x] 2e. Conformance in system mode: riscv-tests' stock `p` env (171/174:
+      rv64u*, rv64mi, rv64si; 3 skipped for interrupts and Sv39) and
+      arch-test in M-mode (266/267, now including cebreak-01); `Htif`
+      module; debug trigger CSRs hardwired to zero
 - [ ] 2f. `Os` processes run in U-mode
 - [ ] 2g. Interrupts
 - [ ] 2h. PMP

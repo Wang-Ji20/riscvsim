@@ -1,29 +1,34 @@
 /* riscv-arch-test (2.x) model definitions for riscvsim.
 
-   Tests run as plain user-mode processes. The signature region is
-   delimited by begin_signature/end_signature, which
-   `riscvsim run --signature FILE` dumps in the reference format. */
+   Tests run bare-metal on a system-mode machine, in M-mode from
+   0x80000000 (see link.ld), like Spike's model. They halt through HTIF by
+   writing 1 to tohost. The signature region is delimited by
+   begin_signature/end_signature. */
 
 #ifndef RISCVSIM_MODEL_TEST_H
 #define RISCVSIM_MODEL_TEST_H
 
 #define RVMODEL_BOOT
 
-#define RVMODEL_HALT \
-    li a0, 0;        \
-    li a7, 93;       \
-    ecall
+#define RVMODEL_HALT            \
+    li x1, 1;                   \
+write_tohost:                   \
+    sw x1, tohost, t5;          \
+    j write_tohost;
 
-#define RVMODEL_DATA_BEGIN \
-    .data;                 \
-    .align 4;              \
-    .global begin_signature; \
+#define RVMODEL_DATA_BEGIN      \
+    .align 4;                   \
+    .global begin_signature;    \
 begin_signature:
 
-#define RVMODEL_DATA_END \
-    .align 4;            \
-    .global end_signature; \
-end_signature:
+#define RVMODEL_DATA_END        \
+    .align 4;                   \
+    .global end_signature;      \
+end_signature:                  \
+    .pushsection .tohost,"aw",@progbits; \
+    .align 8; .global tohost; tohost: .dword 0; \
+    .align 8; .global fromhost; fromhost: .dword 0; \
+    .popsection;
 
 #define RVMODEL_IO_INIT
 #define RVMODEL_IO_WRITE_STR(_R, _STR)

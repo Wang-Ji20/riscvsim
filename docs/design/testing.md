@@ -56,9 +56,18 @@ far it has always been riscvsim.
 
 ### Extra suites: run when changing the ISA, FPU or Linux emulation
 
-- **`@conformance`:** the official riscv-tests (150 programs that check
-  themselves) and riscv-arch-test 2.7.4 (265 programs compared with
-  reference signatures).
+- **`@conformance`:** the official riscv-tests and riscv-arch-test 2.7.4.
+  riscv-tests are programs that check themselves; they run twice:
+  - 150 as Linux processes, through `Os` (our own test environment);
+  - 174 bare-metal, with the suite's own environment, as Spike runs
+    them: on a system-mode machine with RAM at `0x8000_0000`, starting
+    in M-mode, with traps delivered to the test's handlers and the
+    result reported through HTIF. This includes the privileged tests
+    (`rv64mi`, `rv64si`). Three are skipped until their features exist:
+    two need virtual memory, one needs interrupts.
+
+  riscv-arch-test's 267 programs run bare-metal in M-mode too, and their
+  memory *signatures* must match the references shipped with the suite.
 - **`@spike`:** random programs of a few hundred instructions each,
   covering the whole instruction set, started from awkward initial values
   (NaNs, subnormals, badly boxed floats). The final registers and flags

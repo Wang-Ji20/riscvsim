@@ -709,7 +709,7 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
         (match exe with Some e -> e | None -> List.hd (argv @ [ "a.out" ]));
       debug_calls = List.mem_assoc "__riscvsim_debug_calls" img.symbols;
       strace;
-      tohost = List.assoc_opt "tohost" img.symbols;
+      tohost = Htif.tohost img;
     }
   in
   hart.env <- Emulated (fun _ -> syscall t);
@@ -717,14 +717,8 @@ let boot ?(io = std_io) ?(argv = [ "a.out" ]) ?(env = []) ?exe ?strace
 
 (* {1 Running} *)
 
-(** HTIF exit request: bare-metal test programs (built for Spike) halt by
-    storing [(code lsl 1) lor 1] to the [tohost] symbol. *)
 let htif_exit t =
-  Option.bind t.tohost (fun addr ->
-      let v = Memory.load t.hart.mem addr 8 in
-      if Int64.logand v 1L = 1L then
-        Some (Int64.to_int (Int64.shift_right_logical v 1) land 0xff)
-      else None)
+  Option.bind t.tohost (fun tohost -> Htif.exit_code t.hart.mem ~tohost)
 
 (** Run the process until it exits, traps or uses up [fuel]. HTIF exits are
     honoured too: like Spike, [tohost] is polled between slices of instructions

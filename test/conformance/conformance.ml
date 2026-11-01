@@ -1,11 +1,16 @@
 (* Official RISC-V conformance suites, run with `dune build @conformance`.
 
-   - riscv-tests (riscv-software-src): self-checking tests, built against
-     our user-mode environment (riscv-tests-env/riscv_test.h). A test passes
-     when it exits with status 0.
+   - riscv-tests (riscv-software-src): self-checking tests, built twice:
+     against our user-mode environment (riscv-tests-env/riscv_test.h), run
+     as a Linux process, and against the suite's own "p" environment, run
+     on a system-mode machine (RAM at 0x80000000, traps delivered to the
+     test's handlers) like Spike does. The privileged tests (rv64mi, rv64si)
+     need the latter. A test passes when it exits with status 0, through
+     exit(2) or HTIF.
    - riscv-arch-test 2.7.4 (riscv-non-isa): built against our model
-     (arch-test-model/model_test.h). A test passes when its signature
-     region matches the reference signature shipped with the suite.
+     (arch-test-model/model_test.h) and run in system mode. A test passes
+     when its signature region matches the reference signature shipped
+     with the suite.
 
    The suites aren't vendored. Point RISCV_TESTS and RISCV_ARCH_TEST at
    checkouts, by default ../riscv-deps/{riscv-tests,arch-test-2.7.4} next
@@ -17,12 +22,16 @@ let cc = "riscv64-suse-linux-gcc"
 
 type expectation = Exit_zero | Signature of string  (** reference file *)
 
-type test = { name : string; source : string; flags : string list; expect : expectation }
+type mode = User_process | System_machine
+
+type test = { name : string; source : string; flags : string list; mode : mode; expect : expectation }
 
 (** Tests that can't pass for reasons outside the simulator's scope. *)
 let skipped =
   [ ("jalr-01", "binutils >= 2.40 rejects the `la x0, ...` this 2018 test uses");
-    ("cebreak-01", "expects a machine-mode trap handler (ROADMAP phase 2)") ]
+    ("rv64si-dirty", "needs Sv39 virtual memory (ROADMAP phase 3)");
+    ("rv64si-icache-alias", "needs Sv39 virtual memory (ROADMAP phase 3)");
+    ("rv64mi-illegal", "needs interrupts (PLAN 2g)") ]
 [@@ocamlformat "disable"]
 
 (* {1 Locating the suites} *)
@@ -48,9 +57,20 @@ let common_flags = [ "-static"; "-nostdlib"; "-mno-relax"; "-Wl,--no-relax" ]
 
 (* {1 Suite definitions} *)
 
-let riscv_tests root =
+let user_suites = [ "rv64ui"; "rv64um"; "rv64ua"; "rv64uf"; "rv64ud"; "rv64uc"; "rv64uzba"; "rv64uzbb"; "rv64uzbs" ]
+
+(** riscv-tests in [dirs], built for [mode]: our user-mode environment, or
+    the suite's own bare-metal "p" environment and linker script. *)
+let riscv_tests ~mode dirs root =
   let isa = Filename.concat root "isa" in
-  [ "rv64ui"; "rv64um"; "rv64ua"; "rv64uf"; "rv64ud"; "rv64uc"; "rv64uzba"; "rv64uzbb"; "rv64uzbs" ]
+  let env_flags =
+    match mode with
+    | User_process -> [ "-I"; "riscv-tests-env" ]
+    | System_machine ->
+        let p = Filename.concat root "env/p" in
+        [ "-I"; p; "-T"; Filename.concat p "link.ld" ]
+  in
+  dirs
   |> List.concat_map (fun dir ->
          files_with_suffix ".S" (Filename.concat isa dir)
          |> List.map (fun source ->
@@ -58,9 +78,9 @@ let riscv_tests root =
                   name = dir ^ "-" ^ basename_no_ext source;
                   source;
                   flags =
-                    [ "-march=rv64gc_zba_zbb_zbs"; "-mabi=lp64d"; "-I"; "riscv-tests-env"; "-I";
-                      Filename.concat isa "macros/scalar" ]
-                    @ common_flags;
+                    [ "-march=rv64gc_zba_zbb_zbs"; "-mabi=lp64d"; "-I"; Filename.concat isa "macros/scalar" ]
+                    @ env_flags @ common_flags;
+                  mode;
                   expect = Exit_zero;
                 }))
 
@@ -85,9 +105,11 @@ let arch_tests root =
                   source;
                   flags =
                     [ "-march=" ^ march; (if String.contains march 'd' then "-mabi=lp64d" else "-mabi=lp64");
-                      "-Wl,-e,rvtest_init"; "-DXLEN=64"; "-DFLEN=64"; "-DTEST_CASE_1=True";
-                      "-I"; Filename.concat suite "env"; "-I"; "arch-test-model" ]
+                      "-DXLEN=64"; "-DFLEN=64"; "-DTEST_CASE_1=True";
+                      "-I"; Filename.concat suite "env"; "-I"; "arch-test-model";
+                      "-T"; "arch-test-model/link.ld" ]
                     @ common_flags;
+                  mode = System_machine;
                   expect = Signature (Filename.concat dir ("references/" ^ name ^ ".reference_output"));
                 }))
   [@@ocamlformat "disable"]
@@ -103,15 +125,32 @@ let compile t =
   let cmd = String.concat " " ((cc :: t.flags) @ [ Filename.quote t.source; "-o"; Filename.quote out; "2>/dev/null" ]) in
   if Sys.command cmd = 0 then Ok out else Error "does not build"
 
-let simulate elf =
+let fuel = 500_000_000
+
+let run_process image =
+  let os = Os.boot ~io:(Os.buffer_io (Buffer.create 64)) image in
+  (os.hart, Os.run ~fuel os)
+
+(** Boot a bare-metal image on one hart in M-mode, with RAM at 0x80000000,
+    traps delivered to the program, and HTIF exits. *)
+let run_machine (image : Image.t) =
+  let bus = Bus.system ~ram_base:0x8000_0000L ~ram_size:0x400_0000L in
+  let m = Machine.create bus in
+  let hart = Machine.hart m 0 in
+  hart.env <- System;
+  Hart.load hart image;
+  let poll () = Option.bind (Htif.tohost image) (fun tohost -> Htif.exit_code (Bus.ram bus) ~tohost) in
+  (hart, Machine.run ~fuel ~poll m)
+
+let simulate t elf =
   match Elf.read (In_channel.with_open_bin elf In_channel.input_all) with
   | Error e -> Error e
   | Ok { image; _ } ->
-      let os = Os.boot ~io:(Os.buffer_io (Buffer.create 64)) image in
-      Ok (image, os.hart, Hart.run ~fuel:500_000_000 os.hart)
+      let hart, outcome = match t.mode with User_process -> run_process image | System_machine -> run_machine image in
+      Ok (image, hart, outcome)
 
 let check t elf =
-  match simulate elf with
+  match simulate t elf with
   | Error e -> Fail e
   | Ok (image, hart, outcome) -> (
       match (t.expect, outcome) with
@@ -151,7 +190,9 @@ let () =
   else (
     Unix.mkdir scratch 0o755;
     let suites =
-      [ ("riscv-tests", "RISCV_TESTS", "../riscv-deps/riscv-tests", riscv_tests);
+      [ ("riscv-tests (user mode)", "RISCV_TESTS", "../riscv-deps/riscv-tests", riscv_tests ~mode:User_process user_suites);
+        ( "riscv-tests (system mode)", "RISCV_TESTS", "../riscv-deps/riscv-tests",
+          riscv_tests ~mode:System_machine (user_suites @ [ "rv64mi"; "rv64si" ]) );
         ("riscv-arch-test 2.7.4", "RISCV_ARCH_TEST", "../riscv-deps/arch-test-2.7.4", arch_tests) ]
     in
     let failures =
