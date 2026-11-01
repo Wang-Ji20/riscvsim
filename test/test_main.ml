@@ -622,6 +622,57 @@ let test_assembler_errors () =
   check "all errors reported" (List.length (errors "bogus\nnop\nbogus2\n") = 2);
   check "local labels resolve" (errors "1: j 1f\n1: j 1b\n" = [])
 
+(* The decode cache must never run stale code: a store over an instruction
+   that already ran (here, its second half on the next page) is seen. *)
+let test_decode_cache () =
+  section "decode cache coherence";
+  let addi imm =
+    Int64.of_int (encode_exn (Op_imm { op = Addi; rd = Reg.a0; rs1 = Reg.a0; imm }))
+  in
+  let exit_code src =
+    match run_source src with
+    | _, Cpu.Exited c, _ -> c
+    | _, o, _ -> failwith (pp_outcome o)
+  in
+  check_eq ~pp:string_of_int "store over an executed instruction in .text" 6
+    (exit_code
+       (Printf.sprintf
+          "li a0, 0\n\
+           call f\n\
+           la t0, f\n\
+           li t1, %Ld\n\
+           sw t1, 0(t0)\n\
+           fence.i\n\
+           call f\n\
+           li a7, 93\n\
+           ecall\n\
+           f: addi a0, a0, 1\n\
+           ret" (addi 5)));
+  check_eq ~pp:string_of_int "instruction crossing a page, second half rewritten" 6
+    (exit_code
+       (Printf.sprintf
+          ".data\n\
+           buf: .space 8192\n\
+           .text\n\
+           la s0, buf\n\
+           li t0, 4094\n\
+           add s0, s0, t0\n\
+           li t1, %Ld\n\
+           sh t1, 0(s0)\n\
+           srli t1, t1, 16\n\
+           sh t1, 2(s0)\n\
+           li t1, 0x8082\n\
+           sh t1, 4(s0)\n\
+           li a0, 0\n\
+           jalr ra, 0(s0)\n\
+           li t1, %Ld\n\
+           srli t1, t1, 16\n\
+           sh t1, 2(s0)\n\
+           fence.i\n\
+           jalr ra, 0(s0)\n\
+           li a7, 93\n\
+           ecall" (addi 1) (addi 5)))
+
 let test_semantics () =
   section "semantics";
   let regs_after src =
@@ -765,6 +816,7 @@ let () =
   test_fpu_regressions ();
   test_assembler_errors ();
   test_semantics ();
+  test_decode_cache ();
   test_examples ();
   section "properties (QCheck2)";
   let qcheck_failures =

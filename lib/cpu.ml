@@ -26,6 +26,7 @@ type t = {
   f : int64 array;  (** raw bits; singles are NaN-boxed *)
   mutable pc : int64;
   mem : Memory.t;
+  decoded : Decode_cache.t;
   mutable fflags : int;
   mutable frm : int;
   mutable instret : int64;
@@ -37,11 +38,14 @@ type t = {
 }
 
 let create () =
+  let mem = Memory.create () and decoded = Decode_cache.create () in
+  mem.on_code_write <- Decode_cache.invalidate decoded;
   {
     x = Array.make 32 0L;
     f = Array.make 32 0L;
     pc = 0L;
-    mem = Memory.create ();
+    mem;
+    decoded;
     fflags = 0;
     frm = 0;
     instret = 0L;
@@ -430,17 +434,6 @@ let amo t ~op ~width ~rd ~rs1 ~rs2 =
 
 (* {1 Fetch, decode, execute} *)
 
-(** Fetch and decode the instruction at [pc]: the instruction, its length in
-    bytes, and its raw bits. *)
-let fetch t pc =
-  let lo = Int64.to_int (Memory.load t.mem pc 2) in
-  if Compressed.is_compressed lo then (Compressed.expand lo, 2, lo)
-  else
-    let w =
-      lo lor (Int64.to_int (Memory.load t.mem (Int64.add pc 2L) 2) lsl 16)
-    in
-    (Decode.decode w, 4, w)
-
 let execute t (i : Instr.t) ~pc ~len ~bits =
   let next = Int64.add pc (Int64.of_int len) in
   let off o = Int64.add pc (Int64.of_int o) in
@@ -480,7 +473,7 @@ let execute t (i : Instr.t) ~pc ~len ~bits =
     | Unary { op; rd; rs1 } ->
         set t rd (unary op (get t rs1));
         next
-    | Fence _ | Fence_i -> next
+    | Fence _ | Fence_i -> next (* the decode cache is always coherent *)
     | Ecall ->
         t.ecall t;
         next
@@ -531,11 +524,11 @@ let execute t (i : Instr.t) ~pc ~len ~bits =
     faulting instruction. *)
 let step ?trace t =
   let pc = t.pc in
-  match fetch t pc with
-  | None, _, bits -> raise (Trap (Illegal_instruction bits))
-  | Some i, len, bits ->
-      Option.iter (fun f -> f pc i) trace;
-      execute t i ~pc ~len ~bits
+  match Decode_cache.fetch t.decoded t.mem pc with
+  | Error bits -> raise (Trap (Illegal_instruction bits))
+  | Ok { instr; len; bits } ->
+      Option.iter (fun f -> f pc instr) trace;
+      execute t instr ~pc ~len ~bits
 
 type outcome =
   | Exited of int

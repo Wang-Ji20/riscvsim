@@ -176,5 +176,5 @@ TLB) waits for the Phase 1 bus design.
 - [x] O1c. Baseline: 5.7 MIPS, ~70 words/instr
       (`docs/perf/reports/2026-11-01-baseline.md`). Half the time is
       decoding, so O4 moves ahead of O2.
-- [ ] O4. Decode cache
+- [x] O4. Decode cache: 5.7 → 31 MIPS (integer benchmarks about 40)
 - [ ] O2. Unboxed registers

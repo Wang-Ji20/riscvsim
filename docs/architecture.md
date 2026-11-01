@@ -50,6 +50,9 @@ The parts, from the bottom up:
   to and from bits: 32-bit instructions, and the 16-bit compressed ones.
 - **`Memory`** is the simulated memory: a sparse 64-bit address space,
   allocated in 4 KiB pages on first write.
+- **`Decode_cache`** remembers decoded instructions per memory page, so
+  each one is decoded once. A write to a cached page throws that page's
+  entries away (see [instructions](design/instructions.md)).
 - **`Fpu`** computes floating-point results exactly as the IEEE 754
   standard requires, including all rounding modes and exception flags.
 - **`Cpu`** holds the processor state (32 integer registers, 32 FP
@@ -88,7 +91,9 @@ Take `riscvsim run hello.s`:
 4. **Run.** `Os.run` drives the CPU loop:
    - read 16 bits at the program counter; if the low two bits aren't
      `11`, it's a compressed instruction, so expand it; otherwise read 16
-     more bits and decode a 32-bit instruction,
+     more bits and decode a 32-bit instruction. The `Decode_cache` keeps
+     the result, so the next time this address runs, the decoding is
+     skipped,
    - execute it, updating registers and memory,
    - advance the program counter by 2 or 4, unless the instruction
      jumped.

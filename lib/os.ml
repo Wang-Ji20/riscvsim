@@ -185,7 +185,7 @@ let unmap t addr len =
   let last = Int64.shift_right_logical (Int64.add addr (Int64.of_int len)) 12 in
   let rec go p =
     if Int64.compare p last < 0 then (
-      Hashtbl.remove t.cpu.mem.pages (Int64.to_int p);
+      Memory.unmap_page t.cpu.mem (Int64.to_int p);
       go (Int64.succ p))
   in
   go first

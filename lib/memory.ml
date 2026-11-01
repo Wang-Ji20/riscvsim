@@ -7,23 +7,56 @@ let page_bits = 12
 let page_size = 1 lsl page_bits
 let page_mask = page_size - 1
 
-type t = { pages : (int, Bytes.t) Hashtbl.t }
+type page = { bytes : Bytes.t; mutable code : bool }
+(** [code] is set while a decoded copy of the page exists elsewhere (see
+    {!Decode_cache}); the first write after that calls [on_code_write]. *)
 
-let create () = { pages = Hashtbl.create 64 }
+type t = {
+  pages : (int, page) Hashtbl.t;
+  mutable on_code_write : int -> unit;  (** called with the page number *)
+}
+
+let create () = { pages = Hashtbl.create 64; on_code_write = ignore }
 
 (* Page numbers fit in an OCaml int: 64 - 12 = 52 bits. *)
 let page_no addr = Int64.to_int (Int64.shift_right_logical addr page_bits)
 let offset addr = Int64.to_int addr land page_mask
-let find_page t addr = Hashtbl.find_opt t.pages (page_no addr)
 
+let find_page t addr =
+  match Hashtbl.find_opt t.pages (page_no addr) with
+  | Some p -> Some p.bytes
+  | None -> None
+
+(** The page holding [addr], allocated if needed, ready to be written. *)
 let get_page t addr =
   let n = page_no addr in
   match Hashtbl.find_opt t.pages n with
-  | Some p -> p
+  | Some p ->
+      if p.code then (
+        p.code <- false;
+        t.on_code_write n);
+      p.bytes
   | None ->
-      let p = Bytes.make page_size '\000' in
-      Hashtbl.replace t.pages n p;
-      p
+      let bytes = Bytes.make page_size '\000' in
+      Hashtbl.replace t.pages n { bytes; code = false };
+      bytes
+
+(** Note that page [n] now has a decoded copy. False if the page was never
+    written: it reads as zero and has nothing worth caching. *)
+let mark_code t n =
+  match Hashtbl.find_opt t.pages n with
+  | Some p ->
+      p.code <- true;
+      true
+  | None -> false
+
+(** Drop page [n]: it reads as zero again. *)
+let unmap_page t n =
+  match Hashtbl.find_opt t.pages n with
+  | Some p ->
+      if p.code then t.on_code_write n;
+      Hashtbl.remove t.pages n
+  | None -> ()
 
 let load_u8 t addr =
   match find_page t addr with

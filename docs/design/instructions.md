@@ -99,12 +99,55 @@ instruction. `addi a0, a1, 0` becomes `c.mv a0, a1`, which expands to
 differs. Where several compressed forms fit, it makes the same choice as
 clang, so that our output is byte-identical to clang's.
 
+## The decode cache
+
+Decoding is slow compared to executing: the decoder searches the
+`Opcode` tables. Before the cache, half of all run time went there,
+because a loop decoded the same instructions on every pass (see
+[the baseline](../perf/reports/2026-11-01-baseline.md)).
+
+`Decode_cache` keeps one array per *page* of memory that holds code,
+with one slot per 2-byte step, because an instruction can start at any
+even address:
+
+```
+page 0x10 (addresses 0x10000-0x10fff)
+  slot 0    slot 1    slot 2    slot 3   ...  slot 2047
+  addi      (empty)   c.mv      ld       ...
+  0x10000             0x10004   0x10006
+```
+
+A fetch looks up the slot. If it's empty, the instruction is decoded and
+stored. The page used last is remembered, so a loop doesn't even hash its
+page number.
+
+**Coherence.** The cache must never run an old version of an instruction
+that was overwritten. `Memory` marks each page that has cached entries.
+The first write to a marked page, by a store instruction, by a syscall
+such as `read`, or by unmapping it, drops that page's array.
+This is stricter than RISC-V requires: hardware may keep running stale
+instructions until the program executes `fence.i`. Being strict means
+`fence.i` needs no work at all, and programs that forget it still work.
+
+**Instructions that cross pages.** A 4-byte instruction can start 2
+bytes before the end of a page. A write to the *second* page wouldn't
+drop the first page's array, so these rare instructions are never
+cached.
+
+Alternative: invalidate only on `fence.i`. The specification allows
+it, and it would help programs that keep data and code in the same page.
+But a program that forgets `fence.i` would then run stale code, and the
+strict approach costs only one branch per store (checking the page's
+"code" flag).
+
 ## How it is verified
 
 - Random instructions survive `decode (encode i) = i` (20,000 per run).
 - All 65,536 possible 16-bit values are expanded and checked.
 - About 6,000 random instructions, plus 4,000 compression candidates, are
   assembled by both clang and riscvsim, and the bytes must match exactly.
+- Two programs rewrite instructions that already ran, one of them across
+  a page boundary, and must see the new versions.
 
 ## Alternatives considered
 
