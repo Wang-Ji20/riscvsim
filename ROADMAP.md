@@ -167,9 +167,9 @@ hundreds of billions. An interpreter that boxes `int64` everywhere runs at
 maybe 5–20 MIPS, and we want hundreds.
 
 8.1 Benchmarking harness: MIPS on CoreMark, Dhrystone, and a kernel boot to
-    a fixed point. **Baseline (2026-10-31): about 6 MIPS** on a tight loop,
-    with boxed `int64`, a `Hashtbl` page lookup on every fetch, and no
-    decode cache.
+    a fixed point. Micro benchmarks and `bench/run.exe` are done;
+    **baseline (2026-11-01): 5.7 MIPS** geometric mean, half of it spent
+    decoding (docs/perf/reports). C kernels and a boot benchmark remain.
 8.2 Represent registers with unboxed storage: a `Bytes`/Bigarray register
     file accessed with `Bytes.get_int64_le`, or OCaml 5 unboxed types where
     they are available. Build with flambda `-O3`.

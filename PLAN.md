@@ -168,11 +168,13 @@ Live checklist, updated as work lands.
 # Phase 8: performance (docs/perf/plan.md)
 
 Chosen before Phase 1 because every later phase multiplies instruction
-counts, and O1–O2 and O4 don't depend on the Hart/Bus split. O3 (software
+counts, and O1, O2 and O4 don't depend on the Hart/Bus split. O3 (software
 TLB) waits for the Phase 1 bus design.
 
 - [x] O1a. `riscvsim run --stats` and `--profile` (`Stats`)
 - [x] O1b. Micro benchmarks (`bench/micro`) and the harness `bench/run.exe`
-- [ ] O1c. Baseline in `docs/perf/results.csv`
-- [ ] O2. Unboxed registers
+- [x] O1c. Baseline: 5.7 MIPS, ~70 words/instr
+      (`docs/perf/reports/2026-11-01-baseline.md`). Half the time is
+      decoding, so O4 moves ahead of O2.
 - [ ] O4. Decode cache
+- [ ] O2. Unboxed registers

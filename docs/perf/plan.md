@@ -19,10 +19,11 @@ instruction it:
    register write allocates.
 4. **Checks** fuel, tracing and exit conditions.
 
-So a simple `add` costs a hash lookup, two allocations and several
-branches. That's why it runs at about 6 MIPS, which on a 4 GHz host
-means several hundred host instructions per guest instruction. O1 will
-measure the exact figure.
+So a simple `add` costs a hash lookup, several allocations and many
+branches. The [baseline](reports/2026-11-01-baseline.md) measured 5.7
+MIPS and about 70 words allocated per instruction. Half the time goes to
+step 2: the decoder searches its opcode tables with OCaml's generic
+comparison. So the decode cache (O4) is done before O2 and O3.
 
 ## The steps
 

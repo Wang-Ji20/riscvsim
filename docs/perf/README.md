@@ -9,6 +9,9 @@ measure, and the plan for getting faster.
   analysis and reporting.
 - **[Optimization plan](plan.md):** the ordered list of improvements, with
   expected gains and risks.
+- **[Reports](reports/):** measured results, starting with the
+  [baseline](reports/2026-11-01-baseline.md). Raw numbers are in
+  [results.csv](results.csv).
 
 ## Why speed matters
 

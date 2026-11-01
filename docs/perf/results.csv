@@ -1,0 +1,9 @@
+date,commit,benchmark,instructions,median_s,min_s,max_s,mips,words_per_instr,peak_kb,cpu,ocaml
+2026-11-01,8d2cd4b,branches,25500496,5.1751,4.9972,5.3373,4.928,75.12,7176,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,calls,18304873,2.5068,2.5027,2.5509,7.302,70.55,7088,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,calls/rvc,18304873,1.2976,1.2641,1.3068,14.107,52.73,7024,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,fp,18000022,5.7500,5.6102,5.9475,3.130,341.51,7420,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,int_loop,22500019,4.6599,4.5150,5.2364,4.828,78.22,7020,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,int_loop/rvc,22500019,4.0442,4.0257,4.1157,5.563,70.56,7056,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,memory,17236886,4.1092,3.9829,4.3124,4.195,75.14,7172,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
+2026-11-01,8d2cd4b,syscalls,1500011,0.2385,0.2309,0.2529,6.290,72.80,6604,"Intel(R) Core(TM) Ultra 5 125H",5.4.1
